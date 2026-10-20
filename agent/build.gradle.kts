@@ -4,7 +4,7 @@ plugins {
 }
 
 application {
-    mainClass = "Main"
+    mainClass = "org.example.MainKt"
 }
 
 group = "org.example"
