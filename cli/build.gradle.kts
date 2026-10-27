@@ -4,10 +4,10 @@ plugins {
 }
 
 application {
-    mainClass = "org.example.MainKt"
+    mainClass = "org.enderlink.cli.MainKt"
 }
 
-group = "org.example"
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -15,6 +15,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":core"))
     testImplementation(kotlin("test"))
 }
 

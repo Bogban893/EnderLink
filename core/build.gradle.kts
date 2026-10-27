@@ -1,13 +1,8 @@
 plugins {
     kotlin("jvm")
-    application
 }
 
-application {
-    mainClass = "org.example.MainKt"
-}
-
-group = "org.example"
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {

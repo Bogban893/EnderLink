@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm") version "2.4.20"
 }
 
-group = "org.example"
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {
