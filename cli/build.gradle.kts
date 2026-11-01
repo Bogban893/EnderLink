@@ -1,8 +1,13 @@
 plugins {
     kotlin("jvm")
+    application
 }
 
-group = "org.example"
+application {
+    mainClass = "org.enderlink.cli.MainKt"
+}
+
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -10,6 +15,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":core"))
     testImplementation(kotlin("test"))
 }
 
