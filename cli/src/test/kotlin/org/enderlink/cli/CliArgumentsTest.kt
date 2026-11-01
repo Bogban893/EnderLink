@@ -19,11 +19,29 @@ class CliArgumentsTest {
     }
 
     @Test
+    fun `команды файлов принимают свои параметры`() {
+        assertEquals(
+            CliOptions("send", "localhost", 25570, file = "my world.zip"),
+            parseArguments(arrayOf("send", "--host", "localhost", "--file", "my world.zip")),
+        )
+        assertEquals(
+            CliOptions("receive", null, 25570, output = "received"),
+            parseArguments(arrayOf("receive", "--output", "received")),
+        )
+    }
+
+    @Test
     fun `неверные аргументы отклоняются до открытия сокета`() {
         val invalid = listOf(
             arrayOf<String>(),
             arrayOf("unknown"),
             arrayOf("connect"),
+            arrayOf("send", "--host", "localhost"),
+            arrayOf("send", "--file", "file.bin"),
+            arrayOf("receive"),
+            arrayOf("receive", "--output", ""),
+            arrayOf("listen", "--file", "file.bin"),
+            arrayOf("send", "--host", "localhost", "--file", "file.bin", "--output", "received"),
             arrayOf("connect", "--host", ""),
             arrayOf("listen", "--port"),
             arrayOf("listen", "--port", "--host", "localhost"),
