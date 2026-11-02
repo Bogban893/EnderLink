@@ -39,7 +39,7 @@ fun main(args: Array<String>) {
                 }
             }
         }
-        val offer = if (mode == "answer") Signal.read(Path.of(args[1]), "offer") else null
+        val offer = if (mode == "answer") readSignalPath("offer", args[1]) ?: return else null
         val output = Path.of(args[count - 1])
         require(!Files.exists(output)) { "Файл уже существует: $output" }
         println("STUN: ${stun ?: "отключён"}. TURN/relay: отключён.")
@@ -49,10 +49,10 @@ fun main(args: Array<String>) {
             println("Файл ${output.toAbsolutePath()} готов. Отправьте его собеседнику.")
             if (mode == "offer") {
                 println("Оставьте программу запущенной. Получите файл-ответ и введите путь к нему:")
-                val path = readlnOrNull() ?: return
-                peer.acceptAnswer(Signal.read(Path.of(path), "answer"))
+                val answer = readSignalPath("answer") ?: return
+                peer.acceptAnswer(answer)
             }
-            println("Ожидание канала данных (до 60 секунд)…")
+            println("Ожидание канала данных (до ${WebRtcPeer.CONNECT_TIMEOUT_SECONDS / 60} минут)…")
             peer.awaitOpen()
             println("Канал открыт. Введите сообщение, /probe или /quit.")
             chat(peer)
@@ -63,6 +63,27 @@ fun main(args: Array<String>) {
     } catch (e: LinkageError) {
         System.err.println("Не удалось загрузить WebRTC: ${e.message}. См. connectivity-test/README.md")
         exitProcess(1)
+    }
+}
+
+/** Ошибки пути и формата не уничтожают живую сессию и её приглашение. */
+private fun readSignalPath(expected: String, initialPath: String? = null): String? {
+    var nextPath = initialPath
+    while (true) {
+        val path = nextPath ?: run {
+            println("Путь к файлу $expected (или /quit для выхода):")
+            readlnOrNull() ?: return null
+        }
+        nextPath = null
+        if (path == "/quit") return null
+        try {
+            require(path.isNotBlank()) { "Путь не должен быть пустым" }
+            return Signal.read(Path.of(path), expected)
+        } catch (e: IOException) {
+            System.err.println("Не удалось прочитать '$path': ${e.message}. Попробуйте ещё раз.")
+        } catch (e: IllegalArgumentException) {
+            System.err.println("Некорректный путь или файл: ${e.message}. Попробуйте ещё раз.")
+        }
     }
 }
 

@@ -5,3 +5,4 @@ rootProject.name = "EnderLink"
 include("core")
 include("agent")
 include("cli")
+include("connectivity-test")

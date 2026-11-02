@@ -20,6 +20,8 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
     private val sendLock = Any()
     @Volatile private var failure: IOException? = null
     @Volatile private var channel: RTCDataChannel? = null
+    @Volatile private var localCandidates = "ещё не собраны"
+    @Volatile private var remoteCandidates = "ещё не получены"
     private val factory = PeerConnectionFactory()
     private val peer: RTCPeerConnection
 
@@ -42,7 +44,10 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
                 override fun onConnectionChange(state: RTCPeerConnectionState) {
                     log("Соединение: $state")
                     if (state == RTCPeerConnectionState.FAILED) {
-                        fail(IOException("WebRTC не установил соединение; проверьте сети и межсетевой экран"))
+                        log("Кандидаты: локальные [$localCandidates], удалённые [$remoteCandidates]")
+                        fail(IOException("WebRTC не установил прямое соединение. TURN/relay отключён. " +
+                            "По этому статусу нельзя отличить ограничения NAT/провайдера от блокировки " +
+                            "межсетевым экраном или ошибки согласования. Сохраните логи обеих сторон."))
                     } else if (state == RTCPeerConnectionState.CLOSED) stop()
                 }
                 override fun onSelectedCandidatePairChanged(event: RTCCandidatePairChangeEvent) {
@@ -78,7 +83,10 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
         else peer.createAnswer(RTCAnswerOptions(), observer)
         setDescription(await(result, "создание SDP"), true)
         await(gathered, "сбор ICE-кандидатов")
-        return peer.localDescription.sdp
+        return peer.localDescription.sdp.also {
+            localCandidates = candidateSummary(it)
+            log("Локальные ICE-кандидаты: $localCandidates")
+        }
     }
 
     private fun setDescription(description: RTCSessionDescription, local: Boolean) {
@@ -90,6 +98,10 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
         if (local) peer.setLocalDescription(description, observer)
         else peer.setRemoteDescription(description, observer)
         await(result, "применение SDP")
+        if (!local) {
+            remoteCandidates = candidateSummary(description.sdp)
+            log("Принят ${description.sdpType}; удалённые ICE-кандидаты: $remoteCandidates")
+        }
     }
 
     private fun attach(dataChannel: RTCDataChannel) {
@@ -116,7 +128,7 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
         if (dataChannel.state == RTCDataChannelState.OPEN) opened.complete(Unit)
     }
 
-    fun awaitOpen() = await(opened, "открытие канала данных")
+    fun awaitOpen() = await(opened, "открытие канала данных", CONNECT_TIMEOUT_SECONDS)
 
     fun send(bytes: ByteArray) = synchronized(sendLock) {
         require(bytes.size <= MAX_MESSAGE) { "Максимум $MAX_MESSAGE байт на сообщение" }
@@ -166,9 +178,16 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
 
     companion object {
         const val MAX_MESSAGE = 16 * 1024
+        const val CONNECT_TIMEOUT_SECONDS = 300L
 
-        private fun <T> await(result: CompletableFuture<T>, operation: String): T = try {
-            result.get(60, TimeUnit.SECONDS)
+        private fun candidateSummary(sdp: String): String = sdp.lineSequence()
+            .filter { it.startsWith("a=candidate:") }
+            .map { it.substringAfter(" typ ", "unknown").substringBefore(' ').trim() }
+            .groupingBy { it }.eachCount().entries
+            .joinToString { "${it.key}=${it.value}" }.ifEmpty { "нет" }
+
+        private fun <T> await(result: CompletableFuture<T>, operation: String, timeoutSeconds: Long = 60): T = try {
+            result.get(timeoutSeconds, TimeUnit.SECONDS)
         } catch (e: TimeoutException) {
             throw IOException("Таймаут: $operation. Попробуйте новое приглашение или другой STUN.", e)
         } catch (e: ExecutionException) {
