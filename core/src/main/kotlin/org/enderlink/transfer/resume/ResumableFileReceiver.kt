@@ -15,7 +15,7 @@ import java.security.MessageDigest
 class ResumableFileReceiver {
     internal fun receiveHeader(
         connection: Connection, directory: Path, body: ByteArray,
-        progress: (Long, Long) -> Unit,
+        progress: (Long, Long) -> Unit, stateDirectory: Path = directory,
     ): Path {
         val header = ResumeProtocol.parseHeader(body)
         TransferPaths.validateName(header.name)
@@ -23,13 +23,15 @@ class ResumableFileReceiver {
         val root = directory.toRealPath()
         val target = root.resolve(header.name)
         if (Files.exists(target, NOFOLLOW_LINKS)) throw IOException("Файл уже существует: $target")
+        Files.createDirectories(stateDirectory)
+        val stateRoot = stateDirectory.toRealPath()
         val key = ResumeProtocol.hex(ResumeProtocol.digest(body))
-        val cache = root.resolve(".enderlink-resume-$key")
+        val cache = stateRoot.resolve(".enderlink-resume-$key")
         if (!Files.exists(cache, NOFOLLOW_LINKS)) Files.createDirectory(cache)
         if (!Files.isDirectory(cache, NOFOLLOW_LINKS)) throw IOException("Некорректный каталог докачки")
         // Общая блокировка на каталог получения: не даёт двум сессиям писать
         // один результат или удалять состояние во время докачки.
-        FileChannel.open(root.resolve(".enderlink-resume.lock"), CREATE, WRITE, NOFOLLOW_LINKS).use { lockChannel ->
+        FileChannel.open(stateRoot.resolve(".enderlink-resume.lock"), CREATE, WRITE, NOFOLLOW_LINKS).use { lockChannel ->
             val lock = try { lockChannel.tryLock() } catch (e: java.nio.channels.OverlappingFileLockException) { null }
                 ?: throw IOException("В этом каталоге уже идёт докачка")
             lock.use {
@@ -100,6 +102,7 @@ class ResumableFileReceiver {
                             if (!MessageDigest.isEqual(ResumeProtocol.digest(bytes), expected)) throw IOException("Сохранённый блок повреждён")
                             output.write(bytes)
                             fullHash.update(bytes)
+                            Protocol.send(connection, ResumeProtocol.VERIFYING)
                         }
                     }
                     if (!MessageDigest.isEqual(fullHash.digest(), header.hash)) throw IOException("SHA-256 файла не совпадает")

@@ -11,8 +11,8 @@ import java.security.MessageDigest
 
 /** Подготовку выполняют до подключения: вычисление хешей может быть долгим. */
 class ResumableFileSender(private val source: Path) {
-    private val size: Long
-    private val hash: ByteArray
+    internal val size: Long
+    internal val hash: ByteArray
     private val blocks = mutableListOf<ByteArray>()
 
     init {
@@ -61,7 +61,7 @@ class ResumableFileSender(private val source: Path) {
                 progress(done, size)
             }
             Protocol.send(connection, Protocol.END, hash)
-            Protocol.expect(connection, Protocol.SUCCESS)
+            ResumeProtocol.expectSuccess(connection)
         }
     }
 }

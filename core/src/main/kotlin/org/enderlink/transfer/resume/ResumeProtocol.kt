@@ -12,6 +12,20 @@ internal object ResumeProtocol {
     const val BLOCK = 11
     const val HAVE = 12
     const val NEED = 13
+    const val VERIFYING = 16
+    fun response(connection: org.enderlink.network.connection.Connection): Pair<Int, ByteArray> {
+        while (true) {
+            val message = org.enderlink.transfer.protocol.TransferProtocol.read(connection)
+            if (message.first != VERIFYING) return message
+            if (message.second.isNotEmpty()) throw IOException("Некорректное сообщение проверки")
+        }
+    }
+    fun expectSuccess(connection: org.enderlink.network.connection.Connection) {
+        val (type, body) = response(connection)
+        if (type != org.enderlink.transfer.protocol.TransferProtocol.SUCCESS || body.isNotEmpty()) {
+            throw IOException("Получатель не подтвердил передачу")
+        }
+    }
     const val BLOCK_SIZE = 256 * 1024
     data class Header(val name: String, val size: Long, val hash: ByteArray)
     fun digest(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
