@@ -31,6 +31,20 @@ class CliArgumentsTest {
     }
 
     @Test
+    fun `каталог выбирается отдельным параметром`() {
+        assertEquals(
+            CliOptions("send", "localhost", 25570, directory = "Мой мир"),
+            parseArguments(arrayOf("send", "--host", "localhost", "--directory", "Мой мир")),
+        )
+        assertFailsWith<IllegalArgumentException> {
+            parseArguments(arrayOf("send", "--host", "localhost", "--file", "a", "--directory", "b"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            parseArguments(arrayOf("send", "--host", "localhost", "--directory", ""))
+        }
+    }
+
+    @Test
     fun `неверные аргументы отклоняются до открытия сокета`() {
         val invalid = listOf(
             arrayOf<String>(),

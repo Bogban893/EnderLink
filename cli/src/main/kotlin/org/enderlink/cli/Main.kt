@@ -12,7 +12,7 @@ private const val HELP = """EnderLink — локальный TCP-чат и пе�
   listen [--host <адрес>] [--port <порт>]
   connect --host <адрес> [--port <порт>]
   receive --output <каталог> [--host <адрес>] [--port <порт>]
-  send --host <адрес> --file <путь> [--port <порт>]
+  send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>]
 
 Порт по умолчанию: 25570. listen принимает одного участника.
 Для выхода введите /quit или завершите стандартный ввод.
@@ -20,7 +20,7 @@ private const val HELP = """EnderLink — локальный TCP-чат и пе�
 
 data class CliOptions(
     val command: String, val host: String?, val port: Int,
-    val file: String? = null, val output: String? = null,
+    val file: String? = null, val output: String? = null, val directory: String? = null,
 )
 
 fun parseArguments(args: Array<String>): CliOptions {
@@ -28,7 +28,7 @@ fun parseArguments(args: Array<String>): CliOptions {
         "Ожидается команда listen, connect, send или receive"
     }
     val allowed = when (args[0]) {
-        "send" -> setOf("--host", "--port", "--file")
+        "send" -> setOf("--host", "--port", "--file", "--directory")
         "receive" -> setOf("--host", "--port", "--output")
         else -> setOf("--host", "--port")
     }
@@ -47,13 +47,18 @@ fun parseArguments(args: Array<String>): CliOptions {
     val host = options["--host"]
     require(host == null || host.isNotBlank()) { "Адрес не должен быть пустым" }
     require(args[0] !in setOf("connect", "send") || host != null) { "Для ${args[0]} необходим --host" }
-    if (args[0] == "send") require(!options["--file"].isNullOrBlank()) { "Необходим --file" }
+    if (args[0] == "send") {
+        require(("--file" in options) xor ("--directory" in options)) {
+            "Укажите ровно один параметр: --file или --directory"
+        }
+        require(!(options["--file"] ?: options["--directory"]).isNullOrBlank()) { "Путь не должен быть пустым" }
+    }
     if (args[0] == "receive") require(!options["--output"].isNullOrBlank()) { "Необходим --output" }
     val port = options["--port"]?.let {
         requireNotNull(it.toIntOrNull()) { "Порт должен быть целым числом" }
     } ?: 25570
     require(port in 1..65535) { "Порт должен быть в диапазоне 1..65535" }
-    return CliOptions(args[0], host, port, options["--file"], options["--output"])
+    return CliOptions(args[0], host, port, options["--file"], options["--output"], options["--directory"])
 }
 
 fun main(args: Array<String>) {
@@ -73,7 +78,7 @@ fun main(args: Array<String>) {
         when (options.command) {
             "listen" -> ListenCommand().run(options.host, options.port)
             "connect" -> ConnectCommand().run(requireNotNull(options.host), options.port)
-            "send" -> SendCommand().run(requireNotNull(options.host), options.port, requireNotNull(options.file))
+            "send" -> SendCommand().run(requireNotNull(options.host), options.port, options.file, options.directory)
             "receive" -> ReceiveCommand().run(options.host, options.port, requireNotNull(options.output))
         }
     } catch (e: IOException) {

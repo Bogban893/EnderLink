@@ -10,13 +10,17 @@ import java.security.MessageDigest
 
 class FileReceiver {
     fun receive(connection: Connection, directory: Path, progress: (Long, Long) -> Unit = { _, _ -> }): Path {
-        val (type, body) = Protocol.read(connection)
+        return receiveHeader(connection, directory, Protocol.read(connection), progress)
+    }
+
+    internal fun receiveHeader(
+        connection: Connection, directory: Path, header: Pair<Int, ByteArray>,
+        progress: (Long, Long) -> Unit,
+    ): Path {
+        val (type, body) = header
         if (type != Protocol.HEADER) throw IOException("Ожидается описание файла")
         val (name, size) = Protocol.parseHeader(body)
-        // Принимаем только имя, а не путь. Проверяем разделители обеих ОС.
-        if (name.isBlank() || name in setOf(".", "..") || name.any {
-                it == '/' || it == '\\' || it == ':' || it.isISOControl()
-            }) throw IOException("Недопустимое имя файла")
+        TransferPaths.validateName(name)
         Files.createDirectories(directory)
         val root = directory.toRealPath()
         val target = root.resolve(name)

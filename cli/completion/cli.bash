@@ -17,9 +17,9 @@ _enderlink_cli_complete() {
 
     # Значения параметров: имена с пробелами сохраняются одним вариантом.
     case "$previous" in
-        --file|--output)
+        --file|--directory|--output)
             compopt -o filenames 2>/dev/null || :
-            if [[ "$previous" == --output ]]; then
+            if [[ "$previous" == --output || "$previous" == --directory ]]; then
                 while IFS= read -r candidate; do
                     COMPREPLY+=("$candidate")
                 done < <(compgen -d -- "$current")
@@ -38,7 +38,7 @@ _enderlink_cli_complete() {
 
     case "$command" in
         listen|connect) options=(--host --port --help) ;;
-        send) options=(--host --port --file --help) ;;
+        send) options=(--host --port --file --directory --help) ;;
         receive) options=(--host --port --output --help) ;;
         *) return 0 ;;
     esac
@@ -48,7 +48,9 @@ _enderlink_cli_complete() {
         [[ "$option" == --help && "$COMP_CWORD" != 2 ]] && continue
         used=false
         for ((i = 2; i < COMP_CWORD; i += 2)); do
-            if [[ "${COMP_WORDS[i]}" == "$option" ]]; then
+            if [[ "${COMP_WORDS[i]}" == "$option" ||
+                ( "$option" == --directory && "${COMP_WORDS[i]}" == --file ) ||
+                ( "$option" == --file && "${COMP_WORDS[i]}" == --directory ) ]]; then
                 used=true
                 break
             fi
