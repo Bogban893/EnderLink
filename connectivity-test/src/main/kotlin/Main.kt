@@ -1,9 +1,6 @@
 package org.enderlink
 
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption.CREATE_NEW
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -11,11 +8,12 @@ import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 private val help = """Проверка прямого WebRTC-соединения (без TURN/relay).
-  offer <файл-приглашение> [--stun stun:адрес:порт | --no-stun]
-  answer <файл-приглашение> <файл-ответ> [--stun stun:адрес:порт | --no-stun]
+  offer [--stun stun:адрес:порт | --no-stun]
+  answer [--stun stun:адрес:порт | --no-stun]
 
 STUN по умолчанию: stun:stun.l.google.com:19302
-Оба процесса должны оставаться запущенными во время обмена файлами.
+Скопируйте код приглашения собеседнику, затем вставьте полученный код ответа.
+Оба процесса должны оставаться запущенными во время обмена кодами.
 После подключения: текст — сообщение, /probe — проверка 16 КиБ, /quit — выход.
 """
 
@@ -27,29 +25,25 @@ fun main(args: Array<String>) {
     try {
         val mode = args[0]
         require(mode in setOf("offer", "answer")) { "Ожидается offer или answer" }
-        val count = if (mode == "offer") 2 else 3
-        require(args.size >= count) { help }
-        val stun = when (args.drop(count)) {
+        val stun = when (args.drop(1)) {
             emptyList<String>() -> "stun:stun.l.google.com:19302"
             listOf("--no-stun") -> null
             else -> {
-                require(args.size == count + 2 && args[count] == "--stun") { help }
-                args[count + 1].also {
+                require(args.size == 3 && args[1] == "--stun") { help }
+                args[2].also {
                     require(it.startsWith("stun:") && it.length > 5) { "Нужен адрес stun:хост:порт" }
                 }
             }
         }
-        val offer = if (mode == "answer") readSignalPath("offer", args[1]) ?: return else null
-        val output = Path.of(args[count - 1])
-        require(!Files.exists(output)) { "Файл уже существует: $output" }
+        val offer = if (mode == "answer") readSignalCode("offer") ?: return else null
         println("STUN: ${stun ?: "отключён"}. TURN/relay: отключён.")
         WebRtcPeer(stun, ::println).use { peer ->
             val description = if (offer == null) peer.offer() else peer.answer(offer)
-            Files.writeString(output, Signal.encode(mode, description), CREATE_NEW)
-            println("Файл ${output.toAbsolutePath()} готов. Отправьте его собеседнику.")
+            println("Код ${if (mode == "offer") "приглашения" else "ответа"} — скопируйте всю следующую строку собеседнику:")
+            println(Signal.encode(mode, description))
             if (mode == "offer") {
-                println("Оставьте программу запущенной. Получите файл-ответ и введите путь к нему:")
-                val answer = readSignalPath("answer") ?: return
+                println("Оставьте программу запущенной и получите код ответа.")
+                val answer = readSignalCode("answer") ?: return
                 peer.acceptAnswer(answer)
             }
             println("Ожидание канала данных (до ${WebRtcPeer.CONNECT_TIMEOUT_SECONDS / 60} минут)…")
@@ -66,23 +60,16 @@ fun main(args: Array<String>) {
     }
 }
 
-/** Ошибки пути и формата не уничтожают живую сессию и её приглашение. */
-private fun readSignalPath(expected: String, initialPath: String? = null): String? {
-    var nextPath = initialPath
+/** Неверный код можно вставить повторно, сохранив живую сессию. */
+private fun readSignalCode(expected: String): String? {
     while (true) {
-        val path = nextPath ?: run {
-            println("Путь к файлу $expected (или /quit для выхода):")
-            readlnOrNull() ?: return null
-        }
-        nextPath = null
-        if (path == "/quit") return null
+        println("Вставьте код ${if (expected == "offer") "приглашения" else "ответа"} одной строкой (или /quit для выхода):")
+        val code = readlnOrNull() ?: return null
+        if (code.trim() == "/quit") return null
         try {
-            require(path.isNotBlank()) { "Путь не должен быть пустым" }
-            return Signal.read(Path.of(path), expected)
-        } catch (e: IOException) {
-            System.err.println("Не удалось прочитать '$path': ${e.message}. Попробуйте ещё раз.")
+            return Signal.decode(code, expected)
         } catch (e: IllegalArgumentException) {
-            System.err.println("Некорректный путь или файл: ${e.message}. Попробуйте ещё раз.")
+            System.err.println("Некорректный код: ${e.message}. Попробуйте ещё раз.")
         }
     }
 }
