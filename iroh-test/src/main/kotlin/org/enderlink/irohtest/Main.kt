@@ -6,9 +6,11 @@ import computer.iroh.EndpointAddr
 import computer.iroh.EndpointId
 import computer.iroh.EndpointOptions
 import computer.iroh.IrohException
+import computer.iroh.LogLevel
 import computer.iroh.PathChangeCallback
 import computer.iroh.PathSnapshot
 import computer.iroh.presetN0
+import computer.iroh.setLogLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
@@ -19,6 +21,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.nio.file.Path
+import java.net.URI
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -35,6 +38,8 @@ private val HELP = """EnderLink — минимальный iroh-чат с пос
   connect <имя>              Подключиться к сохранённому другу
 
 Для каждой команды: --profile <каталог> (по умолчанию ~/.enderlink/iroh-test).
+Для listen/connect: --debug — подробные сетевые логи.
+Для connect: --relay <https://адрес> — relay друга, показанный его командой listen.
 Добавьте ID друг друга на обоих компьютерах. Один запускает listen, другой connect.
 В чате: /probe — проверка данных, /status — текущий путь, /quit — выход.
 Используются публичные поиск и relay iroh; собственный сервер не требуется.
@@ -43,8 +48,10 @@ private val HELP = """EnderLink — минимальный iroh-чат с пос
 fun main(args: Array<String>) {
     if (args.isEmpty() || args.contentEquals(arrayOf("--help"))) { println(HELP); return }
     try {
-        val (directory, command) = parseArguments(args.toList())
-        Profile.open(directory).use { profile ->
+        val options = parseArguments(args.toList())
+        val command = options.command
+        if (options.debug) setLogLevel(LogLevel.DEBUG)
+        Profile.open(options.directory).use { profile ->
             when (command[0]) {
                 "id" -> println("Ваш ID: ${profile.id}")
                 "friends" -> {
@@ -54,7 +61,7 @@ fun main(args: Array<String>) {
                 }
                 "add" -> { profile.add(command[1], command[2]); println("Друг ${command[1]} сохранён.") }
                 "remove" -> { profile.remove(command[1]); println("Друг ${command[1]} удалён.") }
-                else -> runBlocking { startChat(profile, command) }
+                else -> runBlocking { startChat(profile, options) }
             }
         }
     } catch (e: Exception) {
@@ -67,13 +74,28 @@ fun main(args: Array<String>) {
     }
 }
 
-private fun parseArguments(args: List<String>): Pair<Path, List<String>> {
+private data class Options(val directory: Path, val command: List<String>, val debug: Boolean, val relay: String?)
+
+private fun parseArguments(args: List<String>): Options {
     var directory = Path.of(System.getProperty("user.home"), ".enderlink", "iroh-test")
     val command = mutableListOf<String>()
     var profileSpecified = false
+    var debug = false
+    var relay: String? = null
     var index = 0
     while (index < args.size) {
-        if (args[index] == "--profile") {
+        if (args[index] == "--debug") {
+            require(!debug) { "--debug указан повторно" }
+            debug = true; index++
+        } else if (args[index] == "--relay") {
+            require(relay == null && index + 1 < args.size) { "Укажите --relay <https://адрес> один раз" }
+            relay = args[index + 1]
+            val uri = URI(relay)
+            require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) {
+                "Relay должен быть HTTPS-адресом из вывода listen"
+            }
+            index += 2
+        } else if (args[index] == "--profile") {
             require(!profileSpecified && index + 1 < args.size && args[index + 1].isNotBlank()) { "Укажите --profile <каталог> один раз" }
             directory = Path.of(args[index + 1]); profileSpecified = true; index += 2
         } else { command.add(args[index]); index++ }
@@ -85,10 +107,13 @@ private fun parseArguments(args: List<String>): Pair<Path, List<String>> {
         else -> throw IllegalArgumentException(HELP)
     }
     require(command.size == size) { HELP }
-    return directory to command
+    require(!debug || command[0] in setOf("listen", "connect")) { "--debug используется с listen или connect" }
+    require(relay == null || command[0] == "connect") { "--relay используется только с connect и задаёт relay друга" }
+    return Options(directory, command, debug, relay)
 }
 
-private suspend fun startChat(profile: Profile, command: List<String>) {
+private suspend fun startChat(profile: Profile, options: Options) {
+    val command = options.command
     val target = if (command[0] == "connect") profile.friendId(command[1]) else null
     require(target != null || profile.friends().isNotEmpty()) { "Сначала добавьте друга командой add <имя> <ID>" }
     println("Ваш ID: ${profile.id}")
@@ -97,14 +122,31 @@ private suspend fun startChat(profile: Profile, command: List<String>) {
     try {
         withTimeout(60_000) { endpoint.online() }
         println("Узел онлайн. ID сохраняется после перезапуска и смены сети.")
+        endpoint.addr().use { addr ->
+            println("Мой relay: ${addr.relayUrl() ?: "пока не определён"}")
+        }
         val connection = if (target == null) {
             println("Ожидание сохранённого друга…")
             acceptFriend(endpoint, profile, ::println)
         } else {
             println("Поиск ${command[1]} по постоянному ID…")
+            println("ID друга: $target")
+            if (options.relay != null) println("Relay друга задан явно: ${options.relay}")
             EndpointId.fromString(target).use { id ->
-                EndpointAddr(id, null, emptyList()).use { addr ->
-                    withTimeout(60_000) { endpoint.connect(addr, ALPN) }
+                EndpointAddr(id, options.relay, emptyList()).use { addr ->
+                    try {
+                        withTimeout(60_000) { endpoint.connect(addr, ALPN) }
+                    } catch (e: Exception) {
+                        if (e is CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
+                        endpoint.remoteAddr(id)?.use { known ->
+                            println("Известный relay друга: ${known.relayUrl() ?: "нет"}")
+                            println("Известных прямых адресов друга: ${known.directAddresses().size}")
+                        } ?: println("Адрес друга не появился в локальном кеше поиска.")
+                        val reason = if (e is IrohException) e.debugMessage() else e.message
+                        throw java.io.IOException("Подключение к ${command[1]} ($target) не удалось: $reason. " +
+                            "Проверьте ID и оба работающих процесса. Для диагностики повторите с --debug; " +
+                            "relay из вывода listen можно передать через --relay.", e)
+                    }
                 }
             }
         }

@@ -13,7 +13,10 @@ dependencies {
 
 kotlin { jvmToolchain(21) }
 
-application { mainClass = "org.enderlink.irohtest.MainKt" }
+application {
+    mainClass = "org.enderlink.irohtest.MainKt"
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
+}
 
 tasks.test { useJUnitPlatform() }
 
