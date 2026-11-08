@@ -1,4 +1,4 @@
-package org.enderlink.irohtest
+package org.enderlink.network.iroh
 
 import computer.iroh.EndpointId
 import computer.iroh.SecretKey
@@ -19,12 +19,12 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.util.Properties
 
 /** Один запущенный процесс на профиль; секретный ключ никогда не выводится в консоль. */
-internal class Profile private constructor(
+class IrohProfile private constructor(
     val directory: Path,
     private val lockChannel: FileChannel,
     private val lock: FileLock,
 ) : AutoCloseable {
-    val key: ByteArray = loadKey()
+    internal val key: ByteArray = loadKey()
     val id: String = SecretKey.fromBytes(key).use { secret -> secret.public().use { it.toString() } }
     private val friendsPath = directory.resolve("friends.properties")
     private val relaysPath = directory.resolve("relay-hints.properties")
@@ -47,7 +47,8 @@ internal class Profile private constructor(
         require(name.matches(Regex("[\\p{L}\\p{N}_-]{1,40}"))) {
             "Имя друга: 1–40 букв, цифр, '_' или '-'"
         }
-        val friendId = EndpointId.fromString(rawId).use { it.toString() }
+        val friendId = try { EndpointId.fromString(rawId).use { it.toString() } }
+        catch (e: computer.iroh.IrohException) { throw IllegalArgumentException("Некорректный ID друга: ${e.message()}", e) }
         require(friendId != id) { "Это ваш собственный ID" }
         require(friends.getProperty(name).let { it == null || it == friendId }) {
             "Имя уже занято другим ID. Сначала выполните remove $name"
@@ -114,14 +115,16 @@ internal class Profile private constructor(
     }
 
     companion object {
-        fun open(path: Path): Profile {
+        fun defaultDirectory(): Path = Path.of(System.getProperty("user.home"), ".enderlink", "iroh-test")
+
+        fun open(path: Path = defaultDirectory()): IrohProfile {
             Files.createDirectories(path)
             val directory = path.toRealPath()
             val channel = FileChannel.open(directory.resolve("profile.lock"), CREATE, WRITE)
             try {
                 val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
                     ?: throw IOException("Профиль уже используется. Закройте другой процесс или задайте другой --profile")
-                try { return Profile(directory, channel, lock) }
+                try { return IrohProfile(directory, channel, lock) }
                 catch (e: Throwable) { lock.release(); throw e }
             } catch (e: Throwable) { channel.close(); throw e }
         }
@@ -144,7 +147,7 @@ internal class Profile private constructor(
     }
 }
 
-internal fun validateRelay(raw: String) {
+fun validateRelay(raw: String) {
     val uri = URI(raw)
     require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) {
         "Relay должен быть HTTPS-адресом из вывода listen"

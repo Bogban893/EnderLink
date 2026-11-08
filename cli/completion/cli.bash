@@ -11,15 +11,15 @@ _enderlink_cli_complete() {
     if (( COMP_CWORD == 1 )); then
         while IFS= read -r candidate; do
             COMPREPLY+=("$candidate")
-        done < <(compgen -W 'listen connect send receive --help -h' -- "$current")
+        done < <(compgen -W 'listen connect send receive id add friends remove --help -h' -- "$current")
         return 0
     fi
 
     # Значения параметров: имена с пробелами сохраняются одним вариантом.
     case "$previous" in
-        --file|--directory|--output)
+        --file|--directory|--output|--profile)
             compopt -o filenames 2>/dev/null || :
-            if [[ "$previous" == --output || "$previous" == --directory ]]; then
+            if [[ "$previous" == --output || "$previous" == --directory || "$previous" == --profile ]]; then
                 while IFS= read -r candidate; do
                     COMPREPLY+=("$candidate")
                 done < <(compgen -d -- "$current")
@@ -30,16 +30,20 @@ _enderlink_cli_complete() {
             fi
             return 0
             ;;
-        --host|--port)
+        --host|--port|--peer|--relay)
             # Адрес и порт вводятся пользователем, без выдуманных значений.
             return 0
             ;;
     esac
 
     case "$command" in
-        listen|connect) options=(--host --port --help) ;;
-        send) options=(--host --port --file --directory --help) ;;
-        receive) options=(--host --port --output --help) ;;
+        listen) options=(--host --port --iroh --peer --profile --debug --help) ;;
+        connect) options=(--host --port --peer --iroh --profile --relay --debug --help) ;;
+        send) options=(--host --port --file --directory --peer --iroh --profile --relay --debug --help) ;;
+        receive) options=(--host --port --output --iroh --peer --profile --debug --help) ;;
+        id|friends) options=(--profile --help) ;;
+        add) (( COMP_CWORD < 4 )) && return 0; options=(--profile) ;;
+        remove) (( COMP_CWORD < 3 )) && return 0; options=(--profile) ;;
         *) return 0 ;;
     esac
 
@@ -47,7 +51,7 @@ _enderlink_cli_complete() {
         # Парсер принимает --help только сразу после команды.
         [[ "$option" == --help && "$COMP_CWORD" != 2 ]] && continue
         used=false
-        for ((i = 2; i < COMP_CWORD; i += 2)); do
+        for ((i = 2; i < COMP_CWORD; i++)); do
             if [[ "${COMP_WORDS[i]}" == "$option" ||
                 ( "$option" == --directory && "${COMP_WORDS[i]}" == --file ) ||
                 ( "$option" == --file && "${COMP_WORDS[i]}" == --directory ) ]]; then

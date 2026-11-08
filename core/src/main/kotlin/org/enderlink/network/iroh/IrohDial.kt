@@ -1,4 +1,4 @@
-package org.enderlink.irohtest
+package org.enderlink.network.iroh
 
 import computer.iroh.Connection
 import computer.iroh.Endpoint
@@ -11,11 +11,11 @@ import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 internal suspend fun dialFriend(
-    endpoint: Endpoint, profile: Profile, target: String, explicitRelay: String?, log: (String) -> Unit,
+    endpoint: Endpoint, profile: IrohProfile, target: String, explicitRelay: String?, log: (String) -> Unit,
 ): Connection {
     EndpointId.fromString(target).use { id ->
         suspend fun attempt(relay: String?): Connection = EndpointAddr(id, relay, emptyList()).use { addr ->
-            withTimeout(60_000) { endpoint.connect(addr, ALPN) }
+            withTimeout(60_000) { endpoint.connect(addr, IROH_ALPN) }
         }
         try {
             if (explicitRelay != null) {

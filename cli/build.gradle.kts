@@ -5,6 +5,7 @@ plugins {
 
 application {
     mainClass = "org.enderlink.cli.MainKt"
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
 
 group = "org.enderlink"

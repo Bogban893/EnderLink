@@ -6,8 +6,7 @@ plugins {
 repositories { mavenCentral() }
 
 dependencies {
-    implementation("computer.iroh:iroh:1.2.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation(project(":core"))
     testImplementation(kotlin("test"))
 }
 
