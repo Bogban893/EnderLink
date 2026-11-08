@@ -6,6 +6,34 @@ import kotlin.test.assertFailsWith
 
 class CliArgumentsTest {
     @Test
+    fun `iroh выбирается по другу а TCP параметры не смешиваются с ним`() {
+        val send = parseArguments(arrayOf("send", "--peer", "friend", "--file", "world.zip", "--relay", "https://example.org/", "--profile", "profile"))
+        assertEquals(true, send.iroh)
+        assertEquals("friend", send.peer)
+        assertEquals(null, send.host)
+        assertEquals("world.zip", send.file)
+        assertEquals(true, parseArguments(arrayOf("receive", "--iroh", "--output", "out")).iroh)
+        for (args in listOf(
+            arrayOf("send", "--peer", "friend", "--host", "localhost", "--file", "world.zip"),
+            arrayOf("listen", "--iroh", "--port", "25570"),
+            arrayOf("connect", "--iroh"),
+            arrayOf("connect", "--host", "localhost", "--relay", "https://example.org/"),
+            arrayOf("receive", "--iroh", "--output", "out", "--iroh"),
+        )) assertFailsWith<IllegalArgumentException> { parseArguments(args) }
+    }
+
+    @Test
+    fun `команды профиля требуют явные имя и ID`() {
+        val add = parseArguments(arrayOf("add", "friend", "public-id", "--profile", "profile"))
+        assertEquals("friend", add.friendName)
+        assertEquals("public-id", add.friendId)
+        assertEquals("profile", add.profile)
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("add", "friend")) }
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("remove", "--profile", "profile")) }
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("id", "--host", "localhost")) }
+    }
+
+    @Test
     fun `listen использует порт по умолчанию`() {
         assertEquals(CliOptions("listen", null, 25570), parseArguments(arrayOf("listen")))
     }

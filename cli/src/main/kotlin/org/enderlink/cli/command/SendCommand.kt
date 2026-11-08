@@ -1,8 +1,8 @@
 package org.enderlink.cli.command
 
 import org.enderlink.cli.console.TransferProgress
-import org.enderlink.network.connection.Endpoint
-import org.enderlink.network.tcp.TcpConnection
+import org.enderlink.cli.CliOptions
+import org.enderlink.network.iroh.IrohPurpose
 import org.enderlink.transfer.resume.ResumableFileSender
 import org.enderlink.transfer.resume.ResumableDirectorySender
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -11,9 +11,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class SendCommand {
-    fun run(host: String, port: Int, file: String?, directory: String? = null) {
-        val source = Path.of(requireNotNull(directory ?: file))
-        val isDirectory = directory != null
+    fun run(options: CliOptions) {
+        val source = Path.of(requireNotNull(options.directory ?: options.file))
+        val isDirectory = options.directory != null
         if (isDirectory && !Files.isDirectory(source, NOFOLLOW_LINKS)) {
             throw IOException("Не найден обычный каталог: $source")
         }
@@ -21,9 +21,8 @@ class SendCommand {
         println("Вычисление SHA-256 файлов и блоков…")
         val tree = if (isDirectory) ResumableDirectorySender(source) else null
         val resumable = if (!isDirectory) ResumableFileSender(source) else null
-        println("Подключение к $host:$port для отправки ${source.fileName}")
-        TcpConnection.connect(Endpoint(host, port)).use { connection ->
-            connection.readTimeoutMs = 30_000
+        println("Отправка ${source.fileName}")
+        withConnection(options, IrohPurpose.TRANSFER) { connection ->
             val progress = TransferProgress()
             if (isDirectory) {
                 requireNotNull(tree).send(connection, progress::update)

@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build and test (Java 21)
-    runs-on: ubuntu-latest
+    name: Build (Java 21)
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -31,5 +31,44 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      - name: Build and test all modules
-        run: bash ./gradlew build --no-daemon --stacktrace
+      - name: Assemble all modules and compile tests
+        run: bash ./gradlew assemble testClasses --no-daemon --stacktrace
+
+  test:
+    name: Tests (Java 21)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install native WebRTC runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libx11-6 libxext6 libxfixes3 libxdamage1 libxtst6 \
+            libxrandr2 libxcomposite1 libglib2.0-0t64 libgbm1 libdrm2
+
+      - name: Run tests in all modules
+        run: bash ./gradlew test --no-daemon --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-java-21
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          if-no-files-found: warn
+          retention-days: 7
