@@ -4,6 +4,7 @@ import computer.iroh.EndpointId
 import computer.iroh.SecretKey
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.net.URI
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
@@ -26,11 +27,15 @@ internal class Profile private constructor(
     val key: ByteArray = loadKey()
     val id: String = SecretKey.fromBytes(key).use { secret -> secret.public().use { it.toString() } }
     private val friendsPath = directory.resolve("friends.properties")
-    private val friends = Properties().apply {
-        if (Files.exists(friendsPath)) {
-            Files.newInputStream(friendsPath).use {
+    private val relaysPath = directory.resolve("relay-hints.properties")
+    private val friends = loadProperties(friendsPath)
+    private val relays = loadProperties(relaysPath)
+
+    private fun loadProperties(path: Path): Properties = Properties().apply {
+        if (Files.exists(path)) {
+            Files.newInputStream(path).use {
                 val bytes = it.readNBytes(1024 * 1024 + 1)
-                require(bytes.size <= 1024 * 1024) { "Слишком большой список друзей" }
+                require(bytes.size <= 1024 * 1024) { "Слишком большой файл профиля: ${path.fileName}" }
                 bytes.inputStream().use(::load)
             }
         }
@@ -52,8 +57,11 @@ internal class Profile private constructor(
     }
 
     fun remove(name: String) {
-        require(friends.containsKey(name)) { "Друг не найден: $name" }
+        val removedId = friendId(name)
         saveFriends(Properties().apply { putAll(friends); remove(name) })
+        if (friendName(removedId) == null && relays.containsKey(removedId)) {
+            saveRelays(Properties().apply { putAll(relays); remove(removedId) })
+        }
     }
 
     fun friendId(name: String): String = requireNotNull(friends.getProperty(name)) {
@@ -61,6 +69,26 @@ internal class Profile private constructor(
     }
 
     fun friendName(remoteId: String): String? = friends().entries.firstOrNull { it.value == remoteId }?.key
+
+    fun relayFor(remoteId: String): String? = relays.getProperty(remoteId)?.takeIf { raw ->
+        runCatching { validateRelay(raw); true }.getOrDefault(false)
+    }
+
+    /** Подсказка адреса не заменяет проверку постоянного ID при QUIC-handshake. */
+    fun rememberRelay(remoteId: String, relay: String): Boolean {
+        require(friendName(remoteId) != null) { "Нельзя сохранить relay неизвестного участника" }
+        validateRelay(relay)
+        if (relays.getProperty(remoteId) == relay) return false
+        saveRelays(Properties().apply { putAll(relays); setProperty(remoteId, relay) })
+        return true
+    }
+
+    private fun saveRelays(updated: Properties) {
+        val bytes = ByteArrayOutputStream().also { updated.store(it, "EnderLink relay hints; authenticated IDs remain in friends.properties") }.toByteArray()
+        writeAtomic(relaysPath, bytes)
+        relays.clear()
+        relays.putAll(updated)
+    }
 
     private fun saveFriends(updated: Properties) {
         val bytes = ByteArrayOutputStream().also { updated.store(it, "EnderLink iroh-test friends") }.toByteArray()
@@ -113,5 +141,12 @@ internal class Profile private constructor(
                 catch (_: AtomicMoveNotSupportedException) { Files.move(pending, path, REPLACE_EXISTING) }
             } finally { Files.deleteIfExists(pending) }
         }
+    }
+}
+
+internal fun validateRelay(raw: String) {
+    val uri = URI(raw)
+    require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) {
+        "Relay должен быть HTTPS-адресом из вывода listen"
     }
 }

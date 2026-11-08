@@ -24,16 +24,23 @@ class IrohTest {
         val friend = Profile.open(directory.resolve("friend")).use { it.id }
         val own = Profile.open(directory.resolve("own")).use {
             it.add("Друг", friend)
+            it.rememberRelay(friend, "https://example.org/")
+            assertFailsWith<IllegalArgumentException> { it.rememberRelay(friend, "http://example.org/") }
+            assertFailsWith<IllegalArgumentException> { it.rememberRelay(it.id, "https://example.org/") }
             assertFailsWith<java.io.IOException> { Profile.open(directory.resolve("own")) }
             it.id
         }
         Profile.open(directory.resolve("own")).use {
             assertEquals(own, it.id)
             assertEquals(friend, it.friendId("Друг"))
+            assertEquals("https://example.org/", it.relayFor(friend))
             assertFailsWith<IllegalArgumentException> { it.add("self", own) }
             it.remove("Друг")
         }
-        Profile.open(directory.resolve("own")).use { assertTrue(it.friends().isEmpty()) }
+        Profile.open(directory.resolve("own")).use {
+            assertTrue(it.friends().isEmpty())
+            assertEquals(null, it.relayFor(friend))
+        }
         val keyPath = directory.resolve("own/secret.key")
         Files.write(keyPath, byteArrayOf(1, 2))
         assertFailsWith<IllegalArgumentException> { Profile.open(directory.resolve("own")) }

@@ -2,8 +2,6 @@ package org.enderlink.irohtest
 
 import computer.iroh.Connection
 import computer.iroh.Endpoint
-import computer.iroh.EndpointAddr
-import computer.iroh.EndpointId
 import computer.iroh.EndpointOptions
 import computer.iroh.IrohException
 import computer.iroh.LogLevel
@@ -21,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.nio.file.Path
-import java.net.URI
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -90,10 +87,7 @@ private fun parseArguments(args: List<String>): Options {
         } else if (args[index] == "--relay") {
             require(relay == null && index + 1 < args.size) { "Укажите --relay <https://адрес> один раз" }
             relay = args[index + 1]
-            val uri = URI(relay)
-            require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) {
-                "Relay должен быть HTTPS-адресом из вывода listen"
-            }
+            validateRelay(relay)
             index += 2
         } else if (args[index] == "--profile") {
             require(!profileSpecified && index + 1 < args.size && args[index + 1].isNotBlank()) { "Укажите --profile <каталог> один раз" }
@@ -131,28 +125,13 @@ private suspend fun startChat(profile: Profile, options: Options) {
         } else {
             println("Поиск ${command[1]} по постоянному ID…")
             println("ID друга: $target")
-            if (options.relay != null) println("Relay друга задан явно: ${options.relay}")
-            EndpointId.fromString(target).use { id ->
-                EndpointAddr(id, options.relay, emptyList()).use { addr ->
-                    try {
-                        withTimeout(60_000) { endpoint.connect(addr, ALPN) }
-                    } catch (e: Exception) {
-                        if (e is CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
-                        endpoint.remoteAddr(id)?.use { known ->
-                            println("Известный relay друга: ${known.relayUrl() ?: "нет"}")
-                            println("Известных прямых адресов друга: ${known.directAddresses().size}")
-                        } ?: println("Адрес друга не появился в локальном кеше поиска.")
-                        val reason = if (e is IrohException) e.debugMessage() else e.message
-                        throw java.io.IOException("Подключение к ${command[1]} ($target) не удалось: $reason. " +
-                            "Проверьте ID и оба работающих процесса. Для диагностики повторите с --debug; " +
-                            "relay из вывода listen можно передать через --relay.", e)
-                    }
-                }
-            }
+            dialFriend(endpoint, profile, target, options.relay, ::println)
         }
         connection.use {
             val lastRoute = AtomicReference<String?>(null)
+            val confirmedRelay = AtomicReference<String?>(null)
             fun reportPath(paths: List<PathSnapshot>) {
+                paths.firstOrNull { it.isSelected && it.isRelay }?.let { confirmedRelay.set(it.remoteAddr) }
                 val route = paths.filter { it.isSelected }.joinToString { "${it.id}:${it.remoteAddr}:${it.isRelay}" }
                 if (lastRoute.getAndSet(route) != route) println(describePaths(paths))
             }
@@ -162,6 +141,20 @@ private suspend fun startChat(profile: Profile, options: Options) {
             try {
                 reportPath(connection.paths())
                 IrohChat.open(connection, target != null).use { stream ->
+                    if (target != null) connection.remoteId().use { remote ->
+                        // Запоминаем фактически выбранный relay, а не непроверенную подсказку:
+                        // iroh может самостоятельно восстановиться через другой адрес.
+                        val learnedRelay = confirmedRelay.get()
+                        if (learnedRelay != null) {
+                            try {
+                                if (profile.rememberRelay(remote.toString(), learnedRelay)) {
+                                    println("Relay друга сохранён для следующих подключений: $learnedRelay")
+                                }
+                            } catch (e: java.io.IOException) {
+                                System.err.println("Не удалось сохранить relay друга: ${e.message}")
+                            }
+                        }
+                    }
                     println("Чат открыт. Текст, /probe, /status, /quit.")
                     chat(connection, stream)
                 }
