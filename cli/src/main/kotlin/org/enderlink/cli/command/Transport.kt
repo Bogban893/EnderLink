@@ -11,7 +11,7 @@ import org.enderlink.network.tcp.TcpListener
 import java.nio.file.Path
 
 internal fun <T> withConnection(options: CliOptions, purpose: IrohPurpose, action: (Connection) -> T): T {
-    val receiving = options.command in setOf("listen", "receive")
+    val receiving = options.command in setOf("listen", "receive", "world-receive")
     if (options.iroh) {
         val directory = options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()
         IrohProfile.open(directory).use { profile ->
@@ -19,14 +19,14 @@ internal fun <T> withConnection(options: CliOptions, purpose: IrohPurpose, actio
                 val connection = if (receiving) node.accept(purpose, options.peer)
                 else node.connect(requireNotNull(options.peer), purpose, options.relay)
                 connection.use {
-                    if (purpose == IrohPurpose.TRANSFER) it.readTimeoutMs = 30_000
+                    if (purpose == IrohPurpose.TRANSFER) it.readTimeoutMs = if (options.command.startsWith("world-")) 300_000 else 30_000
                     return action(it)
                 }
             }
         }
     }
     fun use(connection: TcpConnection): T = connection.use {
-        if (purpose == IrohPurpose.TRANSFER) it.readTimeoutMs = 30_000
+        if (purpose == IrohPurpose.TRANSFER) it.readTimeoutMs = if (options.command.startsWith("world-")) 300_000 else 30_000
         action(it)
     }
     if (receiving) {

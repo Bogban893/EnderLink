@@ -6,6 +6,16 @@ import kotlin.test.assertFailsWith
 
 class CliArgumentsTest {
     @Test
+    fun `версии мира используют отдельные команды`() {
+        assertEquals("repo", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).repository)
+        assertEquals("world", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).source)
+        assertEquals(true, parseArguments(arrayOf("world-receive", "--repository", "repo", "--iroh")).iroh)
+        assertEquals("friend", parseArguments(arrayOf("world-send", "--repository", "repo", "--peer", "friend")).peer)
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-send", "--repository", "repo")) }
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-receive", "--output", "out")) }
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-publish", "--repository", "repo", "--host", "localhost")) }
+    }
+    @Test
     fun `iroh выбирается по другу а TCP параметры не смешиваются с ним`() {
         val send = parseArguments(arrayOf("send", "--peer", "friend", "--file", "world.zip", "--relay", "https://example.org/", "--profile", "profile"))
         assertEquals(true, send.iroh)

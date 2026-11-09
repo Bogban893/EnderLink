@@ -11,15 +11,15 @@ _enderlink_cli_complete() {
     if (( COMP_CWORD == 1 )); then
         while IFS= read -r candidate; do
             COMPREPLY+=("$candidate")
-        done < <(compgen -W 'listen connect send receive id add friends remove --help -h' -- "$current")
+        done < <(compgen -W 'listen connect send receive world-publish world-status world-send world-receive id add friends remove --help -h' -- "$current")
         return 0
     fi
 
     # Значения параметров: имена с пробелами сохраняются одним вариантом.
     case "$previous" in
-        --file|--directory|--output|--profile)
+        --file|--directory|--output|--profile|--repository|--source)
             compopt -o filenames 2>/dev/null || :
-            if [[ "$previous" == --output || "$previous" == --directory || "$previous" == --profile ]]; then
+            if [[ "$previous" == --output || "$previous" == --directory || "$previous" == --profile || "$previous" == --repository ]]; then
                 while IFS= read -r candidate; do
                     COMPREPLY+=("$candidate")
                 done < <(compgen -d -- "$current")
@@ -41,6 +41,10 @@ _enderlink_cli_complete() {
         connect) options=(--host --port --peer --iroh --profile --relay --debug --help) ;;
         send) options=(--host --port --file --directory --peer --iroh --profile --relay --debug --help) ;;
         receive) options=(--host --port --output --iroh --peer --profile --debug --help) ;;
+        world-publish) options=(--source --repository --help) ;;
+        world-status) options=(--repository --help) ;;
+        world-send) options=(--repository --host --port --peer --iroh --profile --relay --debug --help) ;;
+        world-receive) options=(--repository --host --port --iroh --peer --profile --debug --help) ;;
         id|friends) options=(--profile --help) ;;
         add) (( COMP_CWORD < 4 )) && return 0; options=(--profile) ;;
         remove) (( COMP_CWORD < 3 )) && return 0; options=(--profile) ;;

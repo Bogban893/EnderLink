@@ -4,20 +4,27 @@ import org.enderlink.cli.command.ConnectCommand
 import org.enderlink.cli.command.ListenCommand
 import org.enderlink.cli.command.SendCommand
 import org.enderlink.cli.command.ReceiveCommand
+import org.enderlink.cli.command.WorldCommand
 import org.enderlink.network.iroh.IrohProfile
 import org.enderlink.network.iroh.validateRelay
 import java.io.IOException
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
-private val networkCommands = setOf("listen", "connect", "send", "receive")
+private val networkCommands = setOf("listen", "connect", "send", "receive", "world-send", "world-receive")
 private val profileCommands = setOf("id", "add", "friends", "remove")
-private const val HELP = """EnderLink — чат и передача файлов по TCP или через интернет (iroh)
+private val localWorldCommands = setOf("world-publish", "world-status")
+private val commands = networkCommands + profileCommands + localWorldCommands
+private const val HELP = """EnderLink — чат, файлы и версии мира по TCP или через интернет (iroh)
 TCP:
   listen [--host <адрес>] [--port <порт>]
   connect --host <адрес> [--port <порт>]
   receive --output <каталог> [--host <адрес>] [--port <порт>]
   send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>]
+  world-publish --source <закрытый мир> --repository <каталог>
+  world-status --repository <каталог>
+  world-receive --repository <каталог> [--host <адрес>] [--port <порт>]
+  world-send --repository <каталог> --host <адрес> [--port <порт>]
 Интернет:
   id | friends
   add <имя> <ID> | remove <имя>
@@ -25,6 +32,8 @@ TCP:
   connect --peer <имя> [--relay <https://адрес>]
   receive --iroh --output <каталог> [--peer <имя>]
   send --peer <имя> (--file <путь> | --directory <каталог>) [--relay <https://адрес>]
+  world-receive --repository <каталог> --iroh [--peer <имя>]
+  world-send --repository <каталог> --peer <имя> [--relay <https://адрес>]
 
 Для iroh: --profile <каталог>, --debug (сеть). Профиль по умолчанию: ~/.enderlink/iroh-test.
 Оба участника один раз добавляют ID друг друга. Relay после успеха запоминается.
@@ -38,21 +47,26 @@ data class CliOptions(
     val iroh: Boolean = false, val peer: String? = null, val profile: String? = null,
     val relay: String? = null, val debug: Boolean = false,
     val friendName: String? = null, val friendId: String? = null,
+    val repository: String? = null, val source: String? = null,
 )
 
 fun parseArguments(args: Array<String>): CliOptions {
-    require(args.isNotEmpty() && args[0] in networkCommands + profileCommands) { "Ожидается команда listen, connect, send, receive, id, add, friends или remove" }
+    require(args.isNotEmpty() && args[0] in commands) { "Неизвестная команда" }
     val command = args[0]
     val positionalCount = when (command) { "add" -> 2; "remove" -> 1; else -> 0 }
     require(args.size > positionalCount) { "Недостаточно аргументов $command" }
     val positional = args.drop(1).take(positionalCount)
     require(positional.all { it.isNotBlank() && !it.startsWith("--") }) { "Укажите имя и ID друга для add, имя для remove" }
-    val allowed = if (command in profileCommands) setOf("--profile") else {
+    val allowed = if (command in profileCommands) setOf("--profile") else if (command in localWorldCommands) {
+        if (command == "world-publish") setOf("--repository", "--source") else setOf("--repository")
+    } else {
         val base = setOf("--host", "--port", "--iroh", "--peer", "--profile", "--debug")
         when (command) {
             "send" -> base + setOf("--file", "--directory", "--relay")
             "receive" -> base + "--output"
             "connect" -> base + "--relay"
+            "world-send" -> base + setOf("--repository", "--relay")
+            "world-receive" -> base + "--repository"
             else -> base
         }
     }
@@ -76,9 +90,9 @@ fun parseArguments(args: Array<String>): CliOptions {
     val iroh = "--iroh" in options || peer != null
     if (iroh) {
         require(host == null && "--port" !in options) { "Для iroh используйте --peer, без --host и --port" }
-        require(command !in setOf("connect", "send") || peer != null) { "Для iroh необходим --peer <имя>" }
+        require(command !in setOf("connect", "send", "world-send") || peer != null) { "Для iroh необходим --peer <имя>" }
     } else if (command in networkCommands) {
-        require(command !in setOf("connect", "send") || host != null) { "Для $command необходим --host или --peer" }
+        require(command !in setOf("connect", "send", "world-send") || host != null) { "Для $command необходим --host или --peer" }
         require(profile == null && "--relay" !in options && "--debug" !in options) { "--profile, --relay и --debug используются с iroh" }
     }
     options["--relay"]?.let(::validateRelay)
@@ -87,15 +101,18 @@ fun parseArguments(args: Array<String>): CliOptions {
         require(!(options["--file"] ?: options["--directory"]).isNullOrBlank()) { "Путь не должен быть пустым" }
     }
     if (command == "receive") require(!options["--output"].isNullOrBlank()) { "Необходим --output" }
+    if (command.startsWith("world-")) require(!options["--repository"].isNullOrBlank()) { "Необходим --repository" }
+    if (command == "world-publish") require(!options["--source"].isNullOrBlank()) { "Необходим --source" }
     val port = options["--port"]?.let { requireNotNull(it.toIntOrNull()) { "Порт должен быть целым числом" } } ?: 25570
     require(port in 1..65535) { "Порт должен быть в диапазоне 1..65535" }
     return CliOptions(command, host, port, options["--file"], options["--output"], options["--directory"],
-        iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1))
+        iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1),
+        options["--repository"], options["--source"])
 }
 
 fun main(args: Array<String>) {
     if (args.isEmpty() || args.contentEquals(arrayOf("--help")) || args.contentEquals(arrayOf("-h")) ||
-        (args.size == 2 && args[0] in networkCommands + profileCommands && args[1] == "--help")) {
+        (args.size == 2 && args[0] in commands && args[1] == "--help")) {
         println(HELP); return
     }
     try {
@@ -105,6 +122,7 @@ fun main(args: Array<String>) {
             "connect" -> ConnectCommand().run(options)
             "send" -> SendCommand().run(options)
             "receive" -> ReceiveCommand().run(options)
+            "world-publish", "world-status", "world-send", "world-receive" -> WorldCommand().run(options)
             else -> IrohProfile.open(options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()).use { profile ->
                 when (options.command) {
                     "id" -> println("Ваш ID: ${profile.id}")
