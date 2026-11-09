@@ -11,6 +11,8 @@ import kotlin.system.exitProcess
 
 private const val HELP = """EnderLink agent — локальный Vanilla Java сервер
   host --repository <каталог> --server-dir <каталог> --jar <server.jar> [--version <ID>] [--java <путь>]
+  tunnel-host --peer <имя> [--profile <каталог>] [--target-host <адрес>] [--target-port <порт>]
+  tunnel-join --peer <имя> [--profile <каталог>] [--local-port <порт>] [--relay <https://адрес>]
 
 В каталоге сервера заранее должны находиться eula.txt с eula=true и, при необходимости,
 server.properties. Мир копируется из проверенной версии репозитория в server-dir/world.
@@ -20,8 +22,13 @@ server.properties. Мир копируется из проверенной ве�
 fun main(args: Array<String>) {
     if (args.isEmpty() || args.contentEquals(arrayOf("--help"))) { println(HELP); return }
     try {
-        require(args[0] == "host") { "Неизвестная команда" }
-        val allowed = setOf("--repository", "--server-dir", "--jar", "--version", "--java")
+        val command = args[0]
+        val allowed = when (command) {
+            "host" -> setOf("--repository", "--server-dir", "--jar", "--version", "--java")
+            "tunnel-host" -> setOf("--peer", "--profile", "--target-host", "--target-port")
+            "tunnel-join" -> setOf("--peer", "--profile", "--local-port", "--relay")
+            else -> throw IllegalArgumentException("Неизвестная команда")
+        }
         val values = mutableMapOf<String, String>()
         require(args.size % 2 == 1) { "Параметры задаются парами" }
         for (index in 1 until args.size step 2) {
@@ -29,6 +36,8 @@ fun main(args: Array<String>) {
             require(key in allowed && key !in values && args[index + 1].isNotBlank()) { "Некорректный параметр: $key" }
             values[key] = args[index + 1]
         }
+        if (command == "tunnel-host") { GameTunnel.host(values); return }
+        if (command == "tunnel-join") { GameTunnel.join(values); return }
         val repository = WorldRepository(Path.of(requireNotNull(values["--repository"]) { "Укажите --repository" }))
         val serverDir = Path.of(requireNotNull(values["--server-dir"]) { "Укажите --server-dir" })
         val jar = Path.of(requireNotNull(values["--jar"]) { "Укажите --jar" }).toAbsolutePath().normalize()

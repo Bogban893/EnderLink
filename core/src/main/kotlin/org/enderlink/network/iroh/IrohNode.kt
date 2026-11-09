@@ -14,7 +14,7 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
 
 internal val IROH_ALPN = "enderlink/connection/1".toByteArray(Charsets.US_ASCII)
-enum class IrohPurpose { CHAT, TRANSFER, DIAGNOSTIC }
+enum class IrohPurpose { CHAT, TRANSFER, DIAGNOSTIC, GAME }
 
 /** Профиль должен оставаться открытым до закрытия узла и всех его соединений. */
 class IrohNode internal constructor(

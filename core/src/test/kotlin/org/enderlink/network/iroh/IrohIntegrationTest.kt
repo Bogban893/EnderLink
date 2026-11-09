@@ -104,6 +104,17 @@ class IrohIntegrationTest {
     }
 
     @Test
+    fun `игровой режим согласуется отдельно от чата и передачи`() {
+        pair(IrohPurpose.GAME) { a, b, _ ->
+            a.send(byteArrayOf(1, 2, 3))
+            assertContentEquals(byteArrayOf(1, 2, 3), b.receive())
+        }
+        assertFailsWith<IOException> {
+            pair(IrohPurpose.GAME, IrohPurpose.TRANSFER) { _, _, _ -> fail("Режимы не должны совпасть") }
+        }
+    }
+
+    @Test
     fun `таймаут чтения закрывает соединение`() {
         pair { a, _, _ ->
             a.readTimeoutMs = 100
