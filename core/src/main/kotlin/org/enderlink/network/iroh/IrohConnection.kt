@@ -35,7 +35,7 @@ class IrohConnection internal constructor(
     override fun send(payload: ByteArray) {
         require(payload.size <= FrameCodec.DEFAULT_MAX_PAYLOAD) { "Сообщение превышает допустимый размер" }
         synchronized(sendLock) {
-            io {
+            io("отправка кадра") {
                 withTimeout(30_000) {
                     send.writeAll(ByteBuffer.allocate(4 + payload.size).putInt(payload.size).put(payload).array())
                 }
@@ -43,7 +43,7 @@ class IrohConnection internal constructor(
         }
     }
 
-    override fun receive(): ByteArray? = io {
+    override fun receive(): ByteArray? = io("чтение кадра") {
         suspend fun read(): ByteArray? {
             val first = recv.read(1u)
             if (first.isEmpty()) return null
@@ -55,13 +55,13 @@ class IrohConnection internal constructor(
         if (timeout == 0) read() else withTimeout(timeout.toLong()) { read() }
     }
 
-    private fun <T> io(block: suspend () -> T): T {
+    private fun <T> io(operation: String, block: suspend () -> T): T {
         if (closed.get()) throw IOException("Соединение закрыто")
         return try { runBlocking(lifetime) { block() } }
         catch (e: Exception) {
             abort()
             if (e is kotlinx.coroutines.TimeoutCancellationException) {
-                throw SocketTimeoutException("Таймаут обмена данными iroh").apply { initCause(e) }
+                throw SocketTimeoutException("Таймаут обмена данными iroh: $operation").apply { initCause(e) }
             }
             if (e is IOException) throw e
             val detail = if (e is IrohException) e.message() else e.message

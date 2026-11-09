@@ -11,6 +11,7 @@ import computer.iroh.setLogLevel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 internal val IROH_ALPN = "enderlink/connection/1".toByteArray(Charsets.US_ASCII)
@@ -22,6 +23,7 @@ class IrohNode internal constructor(
     private val profile: IrohProfile,
     private val log: (String) -> Unit,
     private val shutdownEndpoint: suspend (Endpoint) -> Unit = { it.shutdown() },
+    private val trace: (String) -> Unit = {},
 ) : AutoCloseable {
     fun connect(friend: String, purpose: IrohPurpose = IrohPurpose.CHAT, relay: String? = null): IrohConnection = blocking {
         if (relay != null) validateRelay(relay)
@@ -69,23 +71,35 @@ class IrohNode internal constructor(
         val watcher = native.watchPaths(object : PathChangeCallback {
             override suspend fun onChange(paths: List<PathSnapshot>) { report(paths) }
         })
+        var stage = if (initiator) "открытие исходящего QUIC-потока" else "ожидание входящего QUIC-потока"
         try {
             report(native.paths())
+            trace("iroh: $stage")
             val stream = withTimeout(30_000) { if (initiator) native.openBi() else native.acceptBi() }
+            trace("iroh: QUIC-поток открыт")
             val connection = IrohConnection(native, stream, watcher)
             try {
                 connection.readTimeoutMs = 30_000
                 val hello = "ELIROH2:${purpose.name}".toByteArray(Charsets.US_ASCII)
                 if (initiator) {
+                    stage = "отправка приветствия ($purpose)"
+                    trace("iroh: $stage")
                     connection.send(hello)
+                    stage = "ожидание ответа на приветствие ($purpose)"
+                    trace("iroh: $stage")
                     if (connection.receive()?.contentEquals(hello) != true) throw IOException("Режимы подключения участников не совпадают")
                 } else {
+                    stage = "ожидание приветствия ($purpose)"
+                    trace("iroh: $stage")
                     if (connection.receive()?.contentEquals(hello) != true) {
                         connection.send("Режимы подключения участников не совпадают".toByteArray())
                         throw IOException("Ожидался режим $purpose, собеседник выбрал другой режим")
                     }
+                    stage = "отправка ответа на приветствие ($purpose)"
+                    trace("iroh: $stage")
                     connection.send(hello)
                 }
+                trace("iroh: приветствие подтверждено ($purpose)")
                 connection.readTimeoutMs = 0
                 if (initiator) confirmedRelay.get()?.let { relay ->
                     try {
@@ -99,6 +113,9 @@ class IrohNode internal constructor(
             // prepare мог завершиться до создания адаптера.
             runCatching { watcher.stop(); watcher.close() }
             runCatching { native.close(1L, "handshake failed".toByteArray()); native.close() }
+            if (e is kotlinx.coroutines.TimeoutCancellationException || e is SocketTimeoutException) {
+                throw SocketTimeoutException("Таймаут iroh: $stage").apply { initCause(e) }
+            }
             throw e
         }
     }
@@ -127,7 +144,7 @@ class IrohNode internal constructor(
                 withTimeout(60_000) { endpoint.online() }
                 log("Узел онлайн.")
                 endpoint.addr().use { log("Мой relay: ${it.relayUrl() ?: "пока не определён"}") }
-                IrohNode(endpoint, profile, log)
+                IrohNode(endpoint, profile, log, trace = { if (debug) log(it) })
             } catch (e: Throwable) {
                 runCatching { endpoint.shutdown() }; endpoint.close(); throw e
             }

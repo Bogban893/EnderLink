@@ -76,7 +76,7 @@ class IrohIntegrationTest {
                 val server = runBlocking { Endpoint.bind(EndpointOptions(preset = presetMinimal(), secretKey = sp.key, alpns = listOf(IROH_ALPN))) }
                 val client = runBlocking { Endpoint.bind(EndpointOptions(preset = presetMinimal(), secretKey = cp.key, alpns = listOf(IROH_ALPN))) }
                 val logs = CopyOnWriteArrayList<String>()
-                IrohNode(server, sp, logs::add).use { sn ->
+                IrohNode(server, sp, logs::add, trace = logs::add).use { sn ->
                     IrohNode(client, cp, {}).use { cn ->
                         val executor = Executors.newSingleThreadExecutor()
                         try {
@@ -133,10 +133,24 @@ class IrohIntegrationTest {
     }
 
     @Test
+    fun `диагностика показывает завершенные этапы входящего приветствия`() {
+        pair { _, _, logs ->
+            assertEquals(listOf(
+                "iroh: ожидание входящего QUIC-потока",
+                "iroh: QUIC-поток открыт",
+                "iroh: ожидание приветствия (TRANSFER)",
+                "iroh: отправка ответа на приветствие (TRANSFER)",
+                "iroh: приветствие подтверждено (TRANSFER)",
+            ), logs.filter { it.startsWith("iroh:") })
+        }
+    }
+
+    @Test
     fun `таймаут чтения закрывает соединение`() {
         pair { a, _, _ ->
             a.readTimeoutMs = 100
-            assertFailsWith<SocketTimeoutException> { a.receive() }
+            val error = assertFailsWith<SocketTimeoutException> { a.receive() }
+            assertTrue(error.message.orEmpty().contains("чтение кадра"))
             assertFailsWith<IOException> { a.receive() }
         }
     }
