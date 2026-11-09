@@ -15,7 +15,7 @@ internal fun <T> withConnection(options: CliOptions, purpose: IrohPurpose, accep
     if (options.iroh) {
         val directory = options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()
         IrohProfile.open(directory).use { profile ->
-            IrohNode.open(profile, options.debug).use { node ->
+            IrohNode.open(profile, options.debug, homeRelay = options.homeRelay).use { node ->
                 val connection = if (receiving) node.accept(purpose, options.peer, acceptTimeoutMs.toLong())
                 else node.connect(requireNotNull(options.peer), purpose, options.relay)
                 connection.use {

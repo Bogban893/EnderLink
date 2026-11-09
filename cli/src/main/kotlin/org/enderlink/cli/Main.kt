@@ -36,7 +36,8 @@ TCP:
   world-receive --repository <каталог> --iroh [--peer <имя>]
   world-send --repository <каталог> --peer <имя> [--relay <https://адрес>]
 
-Для iroh: --profile <каталог>, --debug (сеть). Профиль по умолчанию: ~/.enderlink/iroh-test.
+Для iroh: --profile <каталог>, --debug (сеть), --home-relay <https://адрес> (relay своего узла).
+--relay задаёт адрес relay друга при подключении. Профиль по умолчанию: ~/.enderlink/iroh-test.
 Оба участника один раз добавляют ID друг друга. Relay после успеха запоминается.
 TCP-порт по умолчанию: 25570. Передача возобновляется после разрыва, по умолчанию 2 повтора.
 Для выхода из чата: /quit или конец стандартного ввода.
@@ -51,6 +52,7 @@ data class CliOptions(
     val repository: String? = null, val source: String? = null,
     val version: String? = null,
     val retries: Int = 2,
+    val homeRelay: String? = null,
 )
 
 fun parseArguments(args: Array<String>): CliOptions {
@@ -67,7 +69,7 @@ fun parseArguments(args: Array<String>): CliOptions {
             else -> setOf("--repository")
         }
     } else {
-        val base = setOf("--host", "--port", "--iroh", "--peer", "--profile", "--debug")
+        val base = setOf("--host", "--port", "--iroh", "--peer", "--profile", "--debug", "--home-relay")
         when (command) {
             "send" -> base + setOf("--file", "--directory", "--relay", "--retries")
             "receive" -> base + setOf("--output", "--retries")
@@ -100,9 +102,10 @@ fun parseArguments(args: Array<String>): CliOptions {
         require(command !in setOf("connect", "send", "world-send") || peer != null) { "Для iroh необходим --peer <имя>" }
     } else if (command in networkCommands) {
         require(command !in setOf("connect", "send", "world-send") || host != null) { "Для $command необходим --host или --peer" }
-        require(profile == null && "--relay" !in options && "--debug" !in options) { "--profile, --relay и --debug используются с iroh" }
+        require(profile == null && "--relay" !in options && "--debug" !in options && "--home-relay" !in options) { "--profile, --relay, --home-relay и --debug используются с iroh" }
     }
     options["--relay"]?.let(::validateRelay)
+    options["--home-relay"]?.let(::validateRelay)
     if (command == "send") {
         require(("--file" in options) xor ("--directory" in options)) { "Укажите ровно один параметр: --file или --directory" }
         require(!(options["--file"] ?: options["--directory"]).isNullOrBlank()) { "Путь не должен быть пустым" }
@@ -117,7 +120,7 @@ fun parseArguments(args: Array<String>): CliOptions {
     require(retries in 0..5) { "Число повторов должно быть от 0 до 5" }
     return CliOptions(command, host, port, options["--file"], options["--output"], options["--directory"],
         iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1),
-        options["--repository"], options["--source"], options["--version"], retries)
+        options["--repository"], options["--source"], options["--version"], retries, options["--home-relay"])
 }
 
 fun main(args: Array<String>) {

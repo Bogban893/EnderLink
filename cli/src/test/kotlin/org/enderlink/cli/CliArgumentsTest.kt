@@ -6,6 +6,25 @@ import kotlin.test.assertFailsWith
 
 class CliArgumentsTest {
     @Test
+    fun `relay своего узла задается отдельно от relay друга только для iroh`() {
+        val own = "https://use1-1.relay.n0.iroh.link./"
+        val remote = "https://usw1-1.relay.n0.iroh.link./"
+        val listen = parseArguments(arrayOf("listen", "--iroh", "--home-relay", own))
+        assertEquals(own, listen.homeRelay)
+        assertEquals(null, listen.relay)
+        val send = parseArguments(arrayOf("world-send", "--repository", "repo", "--peer", "friend",
+            "--home-relay", own, "--relay", remote))
+        assertEquals(own, send.homeRelay)
+        assertEquals(remote, send.relay)
+        assertEquals(own, parseArguments(arrayOf("world-receive", "--repository", "repo", "--iroh", "--home-relay", own)).homeRelay)
+        for (args in listOf(
+            arrayOf("listen", "--home-relay", own),
+            arrayOf("listen", "--iroh", "--home-relay", "http://example.org/"),
+            arrayOf("listen", "--iroh", "--home-relay"),
+        )) assertFailsWith<IllegalArgumentException> { parseArguments(args) }
+    }
+
+    @Test
     fun `версии мира используют отдельные команды`() {
         assertEquals("repo", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).repository)
         assertEquals("world", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).source)

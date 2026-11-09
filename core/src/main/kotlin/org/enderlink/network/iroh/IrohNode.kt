@@ -4,6 +4,8 @@ import computer.iroh.Connection as NativeConnection
 import computer.iroh.Endpoint
 import computer.iroh.EndpointOptions
 import computer.iroh.LogLevel
+import computer.iroh.IrohException
+import computer.iroh.RelayMode
 import computer.iroh.PathChangeCallback
 import computer.iroh.PathSnapshot
 import computer.iroh.presetN0
@@ -135,11 +137,16 @@ class IrohNode internal constructor(
     }
 
     companion object {
-        fun open(profile: IrohProfile, debug: Boolean = false, log: (String) -> Unit = ::println): IrohNode = blocking {
+        fun open(profile: IrohProfile, debug: Boolean = false, homeRelay: String? = null, log: (String) -> Unit = ::println): IrohNode = blocking {
+            homeRelay?.let(::validateRelay)
             if (debug) setLogLevel(LogLevel.DEBUG)
             log("Ваш ID: ${profile.id}")
             log("Подключение к публичной сети iroh…")
-            val endpoint = Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = profile.key, alpns = listOf(IROH_ALPN)))
+            val relayMode = homeRelay?.let { RelayMode.customFromUrls(listOf(it)) }
+            val endpoint = try {
+                Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = profile.key,
+                    alpns = listOf(IROH_ALPN), relayMode = relayMode))
+            } finally { relayMode?.close() }
             try {
                 withTimeout(60_000) { endpoint.online() }
                 log("Узел онлайн.")
@@ -153,6 +160,7 @@ class IrohNode internal constructor(
         private fun <T> blocking(block: suspend () -> T): T = try { runBlocking { block() } }
         catch (e: IOException) { throw e }
         catch (e: IllegalArgumentException) { throw e }
+        catch (e: IrohException) { throw IOException("Ошибка iroh: ${e.debugMessage()}", e) }
         catch (e: Exception) { throw IOException("Ошибка iroh: ${e.message}", e) }
     }
 }
