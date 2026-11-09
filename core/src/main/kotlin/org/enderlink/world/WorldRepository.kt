@@ -3,6 +3,7 @@ package org.enderlink.world
 import java.io.IOException
 import java.io.InputStream
 import java.io.ByteArrayInputStream
+import java.io.OutputStream
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -24,7 +25,8 @@ class WorldConflictException(val local: String?, val incoming: String) : IOExcep
 data class WorldUpdatePlan(val createOrReplace: List<WorldEntry>, val delete: List<String>)
 
 /** База содержит рабочий `world` и скрытый каталог `.enderlink` с историей. */
-class WorldRepository(base: Path) {
+class WorldRepository internal constructor(base: Path, private val objectOutput: (Path) -> OutputStream) {
+    constructor(base: Path) : this(base, { Files.newOutputStream(it) })
     private val root = base.toAbsolutePath().normalize()
     private val work = root.resolve("world")
     private val meta = root.resolve(".enderlink")
@@ -244,7 +246,7 @@ class WorldRepository(base: Path) {
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
                 var size = 0L
-                Files.newOutputStream(temp).use { output ->
+                objectOutput(temp).use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val count = input.read(buffer)

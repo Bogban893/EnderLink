@@ -10,8 +10,10 @@ import org.enderlink.world.WorldScanner
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
+import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.FileSystemException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
@@ -175,5 +177,56 @@ class WorldTransferTest {
         assertEquals(remote, receiver.load(remote.versionId))
         receiver.checkout(remote.versionId)
         assertEquals("sender branch", Files.readString(receiver.workingDirectory.resolve("level.dat")))
+    }
+
+    @Test
+    fun `отказ записи объекта сохраняет старую версию и позволяет повторить передачу`() {
+        val (sender, receiver) = repositories()
+        exchange(sender, receiver)
+        val previous = receiver.current()!!
+        Files.write(sender.workingDirectory.resolve("new-large"), ByteArray(300_000) { (it % 199).toByte() })
+        sender.publish(sender.workingDirectory)
+        val receiverRoot = root.resolve("receiver")
+        val failing = WorldRepository(receiverRoot) { path ->
+            val output = Files.newOutputStream(path)
+            object : OutputStream() {
+                var written = 0
+                override fun write(value: Int) {
+                    if (written >= 32_768) throw FileSystemException(path.toString(), null, "No space left on device")
+                    output.write(value)
+                    written++
+                }
+                override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                    val allowed = minOf(length, 32_768 - written)
+                    if (allowed > 0) output.write(bytes, offset, allowed)
+                    written += allowed
+                    if (allowed < length) throw FileSystemException(path.toString(), null, "No space left on device")
+                }
+                override fun close() = output.close()
+            }
+        }
+        TcpListener.open(0, "127.0.0.1").use { listener ->
+            TcpConnection.connect(Endpoint("127.0.0.1", listener.port)).use { client ->
+                listener.accept(2_000).use { server ->
+                    client.readTimeoutMs = 5_000
+                    server.readTimeoutMs = 5_000
+                    val executor = Executors.newSingleThreadExecutor()
+                    try {
+                        val receiving = executor.submit<Throwable?> {
+                            runCatching { WorldTransfer.receive(failing, server) }.exceptionOrNull()
+                        }
+                        assertFailsWith<IOException> { WorldTransfer.send(sender, client) }
+                        assertTrue(receiving.get(10, TimeUnit.SECONDS) is IOException)
+                    } finally { executor.shutdownNow() }
+                }
+            }
+        }
+        assertEquals(previous.versionId, receiver.current()!!.versionId)
+        assertFalse(Files.exists(receiver.workingDirectory.resolve("new-large")))
+        Files.list(receiverRoot.resolve(".enderlink/objects")).use { files ->
+            assertEquals(0L, files.filter { it.fileName.toString().startsWith("incoming-") }.count())
+        }
+        exchange(sender, receiver)
+        assertEquals(sender.current()!!.versionId, receiver.current()!!.versionId)
     }
 }
