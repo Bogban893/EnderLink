@@ -21,6 +21,7 @@ class IrohNode internal constructor(
     private val endpoint: Endpoint,
     private val profile: IrohProfile,
     private val log: (String) -> Unit,
+    private val shutdownEndpoint: suspend (Endpoint) -> Unit = { it.shutdown() },
 ) : AutoCloseable {
     fun connect(friend: String, purpose: IrohPurpose = IrohPurpose.CHAT, relay: String? = null): IrohConnection = blocking {
         if (relay != null) validateRelay(relay)
@@ -103,7 +104,17 @@ class IrohNode internal constructor(
     }
 
     override fun close() {
-        try { runBlocking { withTimeout(10_000) { endpoint.shutdown() } } } finally { endpoint.close() }
+        try {
+            runBlocking { withTimeout(10_000) { shutdownEndpoint(endpoint) } }
+        } catch (e: Exception) {
+            // Ошибка очистки не должна скрывать результат операции или её исходную ошибку.
+            log("Предупреждение: iroh не завершил остановку узла: ${e.message}")
+        }
+        try {
+            endpoint.close()
+        } catch (e: Exception) {
+            log("Предупреждение: iroh не закрыл узел: ${e.message}")
+        }
     }
 
     companion object {

@@ -3,7 +3,9 @@ package org.enderlink.network.iroh
 import computer.iroh.Endpoint
 import computer.iroh.EndpointOptions
 import computer.iroh.presetMinimal
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.enderlink.network.connection.Connection
 import org.enderlink.transfer.TransferReceiver
 import org.enderlink.transfer.resume.ResumableDirectorySender
@@ -22,6 +24,22 @@ import kotlin.test.*
 @Timeout(30)
 class IrohIntegrationTest {
     @TempDir lateinit var root: Path
+
+    @Test
+    fun `таймаут остановки iroh не скрывает успешный результат`() {
+        IrohProfile.open(root.resolve("shutdown-profile")).use { profile ->
+            val endpoint = runBlocking {
+                Endpoint.bind(EndpointOptions(preset = presetMinimal(), secretKey = profile.key, alpns = listOf(IROH_ALPN)))
+            }
+            val logs = mutableListOf<String>()
+            val result = IrohNode(endpoint, profile, logs::add, shutdownEndpoint = {
+                withTimeout(1) { delay(100) }
+            }).use { "Получатель подтвердил файл" }
+
+            assertEquals("Получатель подтвердил файл", result)
+            assertTrue(logs.any { it.contains("Предупреждение: iroh не завершил остановку узла") })
+        }
+    }
 
     @Test
     fun `старый профиль сохраняет ID друзей и relay при переносе в core`() {
