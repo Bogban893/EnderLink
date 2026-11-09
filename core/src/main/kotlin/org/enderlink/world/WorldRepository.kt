@@ -109,9 +109,9 @@ class WorldRepository(base: Path) {
                 if (input.read() != -1) throw IOException("Файл изменился во время публикации: ${entry.path}")
             }
         }
+        if (WorldScanner.scan(sourceRoot, id, old?.versionId) != manifest) throw IOException("Мир изменился во время публикации")
         saveManifest(manifest)
         if (sourceRoot == work) {
-            if (WorldScanner.scan(work, id, old?.versionId) != manifest) throw IOException("Мир изменился во время публикации")
             writeMarker(active, manifest.versionId)
         }
         else activate(manifest, old, allowBranch = false)
