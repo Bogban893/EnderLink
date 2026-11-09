@@ -4,6 +4,8 @@ import org.enderlink.network.connection.Connection
 import org.enderlink.world.WorldEntry
 import org.enderlink.world.WorldEntryType
 import org.enderlink.world.WorldManifest
+import org.enderlink.world.WorldManifestIO
+import org.enderlink.world.WorldBlock
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -25,6 +27,7 @@ internal object WorldTransferProtocol {
     const val STORED = 9
     const val COMPLETE = 10
     const val ERROR = 11
+    const val BLOCK = 12
     const val BLOCK_SIZE = 256 * 1024
     private const val MAX_ENTRIES = 1_000_000
 
@@ -76,9 +79,19 @@ internal object WorldTransferProtocol {
             DataOutputStream(encoded).use { out ->
                 out.writeUTF(entry.path)
                 out.writeByte(if (entry.type == WorldEntryType.DIRECTORY) 0 else 1)
-                if (entry.type == WorldEntryType.FILE) { out.writeLong(entry.size); out.writeUTF(entry.hash!!) }
+                if (entry.type == WorldEntryType.FILE) {
+                    out.writeLong(entry.size); out.writeUTF(entry.hash!!)
+                    if (manifest.formatVersion == 2) out.writeInt(entry.blocks.size)
+                }
             }
             send(connection, ENTRY, encoded.toByteArray())
+            if (manifest.formatVersion == 2 && entry.type == WorldEntryType.FILE) {
+                for (block in entry.blocks) {
+                    val bytes = ByteArrayOutputStream()
+                    DataOutputStream(bytes).use { out -> out.writeUTF(block.hash); out.writeInt(block.size) }
+                    send(connection, BLOCK, bytes.toByteArray())
+                }
+            }
         }
     }
 
@@ -101,7 +114,24 @@ internal object WorldTransferProtocol {
             val path = input.readUTF()
             entries.add(when (input.readUnsignedByte()) {
                 0 -> WorldEntry(path, WorldEntryType.DIRECTORY)
-                1 -> WorldEntry(path, WorldEntryType.FILE, input.readLong(), input.readUTF())
+                1 -> {
+                    val size = input.readLong()
+                    val hash = input.readUTF()
+                    if (format == 2) {
+                        val count = input.readInt()
+                        WorldManifestIO.validateBlockCount(count, size)
+                        if (input.available() != 0) throw IOException("Лишние данные записи мира")
+                        val blocks = List(count) {
+                            val (blockType, blockBody) = read(connection)
+                            if (blockType != BLOCK) throw IOException("Ожидается описание блока")
+                            val blockInput = DataInputStream(ByteArrayInputStream(blockBody))
+                            val block = WorldBlock(blockInput.readUTF(), blockInput.readInt())
+                            if (blockInput.available() != 0) throw IOException("Лишние данные блока")
+                            block
+                        }
+                        WorldEntry(path, WorldEntryType.FILE, size, hash, blocks)
+                    } else WorldEntry(path, WorldEntryType.FILE, size, hash)
+                }
                 else -> throw IOException("Неизвестный тип записи мира")
             })
             if (input.available() != 0) throw IOException("Лишние данные записи мира")

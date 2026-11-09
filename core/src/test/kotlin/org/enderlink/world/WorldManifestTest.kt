@@ -63,5 +63,20 @@ class WorldManifestTest {
         }
         val manifest = WorldScanner.scan(world, worldId)
         assertEquals(20L * 1024 * 1024, manifest.entries.single().size)
+        assertEquals(80, manifest.entries.single().blocks.size)
+    }
+
+    @Test
+    fun `список блоков включен в ID версии`() {
+        val world = Files.createDirectory(root.resolve("world"))
+        Files.write(world.resolve("region.mca"), ByteArray(WorldManifest.BLOCK_SIZE + 7) { it.toByte() })
+        val original = WorldScanner.scan(world, worldId)
+        val entry = original.entries.single()
+        val changed = entry.copy(blocks = entry.blocks.toMutableList().also {
+            it[0] = it[0].copy(hash = "sha256:" + "0".repeat(64))
+        })
+        val tampered = original.copy(entries = listOf(changed))
+        assertEquals(original.treeHash, WorldManifest.create(worldId, null, listOf(changed)).treeHash)
+        assertFailsWith<IOException> { tampered.validate() }
     }
 }

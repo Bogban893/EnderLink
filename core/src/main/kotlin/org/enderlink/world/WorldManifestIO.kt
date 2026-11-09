@@ -30,6 +30,10 @@ internal object WorldManifestIO {
                 if (entry.type == WorldEntryType.FILE) {
                     out.writeLong(entry.size)
                     out.writeUTF(entry.hash!!)
+                    if (manifest.formatVersion == 2) {
+                        out.writeInt(entry.blocks.size)
+                        for (block in entry.blocks) { out.writeUTF(block.hash); out.writeInt(block.size) }
+                    }
                 }
             }
         }
@@ -51,12 +55,30 @@ internal object WorldManifestIO {
                 val name = input.readUTF()
                 entries.add(when (input.readUnsignedByte()) {
                     0 -> WorldEntry(name, WorldEntryType.DIRECTORY)
-                    1 -> WorldEntry(name, WorldEntryType.FILE, input.readLong(), input.readUTF())
+                    1 -> {
+                        val size = input.readLong()
+                        val hash = input.readUTF()
+                        WorldEntry(name, WorldEntryType.FILE, size, hash, readBlocks(input, format, size))
+                    }
                     else -> throw IOException("Неизвестный тип записи")
                 })
             }
             if (input.read() != -1) throw IOException("Лишние данные в манифесте")
             return WorldManifest(format, worldId, versionId, parent, treeHash, entries).also { it.validate() }
         }
+    }
+
+    internal fun readBlocks(input: DataInputStream, format: Int, size: Long): List<WorldBlock> {
+        if (format == 1) return emptyList()
+        if (format != 2 || size < 0) throw IOException("Некорректный формат блоков")
+        val count = input.readInt()
+        validateBlockCount(count, size)
+        return List(count) { WorldBlock(input.readUTF(), input.readInt()) }
+    }
+
+    internal fun validateBlockCount(count: Int, size: Long) {
+        if (size < 0) throw IOException("Некорректный размер файла")
+        val expected = size / WorldManifest.BLOCK_SIZE + if (size % WorldManifest.BLOCK_SIZE != 0L) 1 else 0
+        if (count < 0 || count.toLong() != expected || count > 2_000_000) throw IOException("Некорректное число блоков")
     }
 }

@@ -5,6 +5,7 @@ import org.enderlink.network.connection.Endpoint
 import org.enderlink.network.tcp.TcpConnection
 import org.enderlink.network.tcp.TcpListener
 import org.enderlink.world.WorldRepository
+import org.enderlink.world.WorldManifest
 import org.enderlink.world.WorldScanner
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
@@ -76,8 +77,11 @@ class WorldTransferTest {
         val (sender, receiver) = repositories()
         val first = exchange(sender, receiver)
         assertTrue(first.transferredBytes > 600_000)
+        assertTrue(first.wireSentBytes > first.transferredBytes)
         assertEquals(sender.current()!!.treeHash, receiver.current()!!.treeHash)
-        assertEquals(0, exchange(sender, receiver).transferredBytes)
+        val unchanged = exchange(sender, receiver)
+        assertEquals(0, unchanged.transferredBytes)
+        assertTrue(unchanged.wireSentBytes > 0)
         Files.delete(sender.workingDirectory.resolve("level.dat"))
         Files.writeString(sender.workingDirectory.resolve("new.dat"), "second")
         sender.publish(sender.workingDirectory)
@@ -111,12 +115,31 @@ class WorldTransferTest {
         exchange(sender, receiver)
         val old = receiver.current()!!
         val region = old.entries.single { it.path == "region.mca" }
-        Files.writeString(root.resolve("receiver/.enderlink/objects/${region.hash!!.removePrefix("sha256:")}"), "corrupt")
+        Files.writeString(root.resolve("receiver/.enderlink/objects/${region.blocks.first().hash.removePrefix("sha256:")}"), "corrupt")
         Files.writeString(sender.workingDirectory.resolve("level.dat"), "updated")
         sender.publish(sender.workingDirectory)
         val stats = exchange(sender, receiver)
-        assertTrue(stats.transferredBytes >= 600_000)
+        assertTrue(stats.transferredBytes >= WorldManifest.BLOCK_SIZE)
         assertEquals(sender.current()!!.versionId, receiver.current()!!.versionId)
+    }
+
+    @Test
+    fun `изменение одного блока большого файла передает только этот блок`() {
+        val (sender, receiver) = repositories()
+        exchange(sender, receiver)
+        val first = receiver.current()!!
+        val file = sender.workingDirectory.resolve("region.mca")
+        val updated = Files.readAllBytes(file)
+        updated[WorldManifest.BLOCK_SIZE + 100] = (updated[WorldManifest.BLOCK_SIZE + 100] + 1).toByte()
+        Files.write(file, updated)
+        val second = sender.publish(sender.workingDirectory)
+        assertEquals(first.treeHash != second.treeHash, true)
+        val stats = exchange(sender, receiver)
+        assertEquals(WorldManifest.BLOCK_SIZE.toLong(), stats.transferredBytes)
+        assertTrue(stats.reusedBytes > 300_000)
+        assertTrue(updated.contentEquals(Files.readAllBytes(receiver.workingDirectory.resolve("region.mca"))))
+        receiver.checkout(first.versionId)
+        assertFalse(updated.contentEquals(Files.readAllBytes(receiver.workingDirectory.resolve("region.mca"))))
     }
 
     @Test
@@ -143,10 +166,14 @@ class WorldTransferTest {
         exchange(sender, receiver)
         Files.writeString(sender.workingDirectory.resolve("level.dat"), "sender branch")
         sender.publish(sender.workingDirectory)
+        val remote = sender.current()!!
         Files.writeString(receiver.workingDirectory.resolve("level.dat"), "receiver branch")
         val local = receiver.publish(receiver.workingDirectory)
         assertFailsWith<IOException> { exchange(sender, receiver) }
         assertEquals(local.versionId, receiver.current()!!.versionId)
         assertEquals("receiver branch", Files.readString(receiver.workingDirectory.resolve("level.dat")))
+        assertEquals(remote, receiver.load(remote.versionId))
+        receiver.checkout(remote.versionId)
+        assertEquals("sender branch", Files.readString(receiver.workingDirectory.resolve("level.dat")))
     }
 }

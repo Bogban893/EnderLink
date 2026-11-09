@@ -32,6 +32,43 @@ class WorldRepositoryTest {
     }
 
     @Test
+    fun `хранилище формата 1 читается и обновляется до формата 2`() {
+        val repo = WorldRepository(root.resolve("legacy"))
+        Files.createDirectories(repo.workingDirectory)
+        val file = Files.writeString(repo.workingDirectory.resolve("level.dat"), "old bytes")
+        val legacy = WorldScanner.scan(repo.workingDirectory, WorldManifest.newWorldId(), formatVersion = 1)
+        val meta = root.resolve("legacy/.enderlink")
+        WorldManifestIO.write(meta.resolve("versions/${legacy.versionId.removePrefix("sha256:")}.manifest"), legacy)
+        Files.copy(file, meta.resolve("objects/${legacy.entries.single().hash!!.removePrefix("sha256:")}"))
+        Files.writeString(meta.resolve("active"), legacy.versionId + "\n")
+        repo.verifyCurrent()
+        Files.writeString(file, "new bytes")
+        val next = repo.publish(repo.workingDirectory)
+        assertEquals(2, next.formatVersion)
+        assertEquals(legacy.versionId, next.parentVersionId)
+        repo.checkout(legacy.versionId)
+        assertEquals("old bytes", Files.readString(file))
+    }
+
+    @Test
+    fun `очистка хранит объекты всех версий и незавершенной операции`() {
+        val (a, b) = prepare()
+        val first = b.current()!!
+        Files.writeString(a.workingDirectory.resolve("level.dat"), "new bytes")
+        val second = a.publish(a.workingDirectory)
+        b.importFrom(a, second) // Манифест записан, активация ещё не началась.
+        val orphan = root.resolve("b/.enderlink/objects/${"f".repeat(64)}")
+        Files.writeString(orphan, "orphan")
+        assertEquals(1, b.pruneUnreferencedObjects())
+        assertFalse(Files.exists(orphan))
+        b.activate(second)
+        b.checkout(first.versionId)
+        assertEquals("level-one", Files.readString(b.workingDirectory.resolve("level.dat")))
+        b.checkout(second.versionId)
+        assertEquals("new bytes", Files.readString(b.workingDirectory.resolve("level.dat")))
+    }
+
+    @Test
     fun `первая публикация обновление удаления и восстановление`() {
         val (a, b) = prepare()
         val first = a.current()!!

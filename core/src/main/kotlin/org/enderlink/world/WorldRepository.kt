@@ -2,6 +2,7 @@ package org.enderlink.world
 
 import java.io.IOException
 import java.io.InputStream
+import java.io.ByteArrayInputStream
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -64,21 +65,21 @@ class WorldRepository(base: Path) {
         saveManifest(manifest)
     }
 
-    fun hasObject(entry: WorldEntry): Boolean = locked {
-        requireFile(entry)
-        matchesObject(objectPath(entry.hash!!), entry)
+    fun hasObject(ref: WorldObjectRef): Boolean = locked {
+        requireObject(ref)
+        matchesObject(objectPath(ref.hash), ref)
     }
 
-    fun openObject(entry: WorldEntry): InputStream = locked {
-        requireFile(entry)
-        val path = objectPath(entry.hash!!)
-        if (!matchesObject(path, entry)) throw IOException("Объект повреждён или отсутствует: ${entry.hash}")
+    fun openObject(ref: WorldObjectRef): InputStream = locked {
+        requireObject(ref)
+        val path = objectPath(ref.hash)
+        if (!matchesObject(path, ref)) throw IOException("Объект повреждён или отсутствует: ${ref.hash}")
         Files.newInputStream(path, NOFOLLOW_LINKS)
     }
 
-    fun storeObject(entry: WorldEntry, source: InputStream) = locked {
-        requireFile(entry)
-        putObject(entry, source, skipExisting = false)
+    fun storeObject(ref: WorldObjectRef, source: InputStream) = locked {
+        requireObject(ref)
+        putObject(ref, source, skipExisting = false)
     }
 
     fun plan(target: WorldManifest): WorldUpdatePlan = locked {
@@ -99,7 +100,14 @@ class WorldRepository(base: Path) {
         val manifest = WorldScanner.scan(sourceRoot, id, old?.versionId)
         if (old != null && old.treeHash == manifest.treeHash) return@locked old
         for (entry in manifest.entries.filter { it.type == WorldEntryType.FILE }) {
-            putObject(entry, Files.newInputStream(sourceRoot.resolve(entry.path), NOFOLLOW_LINKS))
+            Files.newInputStream(sourceRoot.resolve(entry.path), NOFOLLOW_LINKS).use { input ->
+                for (block in entry.blocks) {
+                    val bytes = ByteArray(block.size)
+                    if (WorldScanner.readBlock(input, bytes) != block.size) throw IOException("Файл изменился во время публикации: ${entry.path}")
+                    putObject(WorldObjectRef(block.hash, block.size.toLong()), ByteArrayInputStream(bytes))
+                }
+                if (input.read() != -1) throw IOException("Файл изменился во время публикации: ${entry.path}")
+            }
         }
         saveManifest(manifest)
         if (sourceRoot == work) {
@@ -116,8 +124,8 @@ class WorldRepository(base: Path) {
         manifest.validate()
         val local = readActive()
         if (local != null && local.worldId != manifest.worldId) throw IOException("Это другой мир")
-        for (entry in manifest.entries.filter { it.type == WorldEntryType.FILE }) {
-            putObject(entry, Files.newInputStream(other.objectPath(entry.hash!!), NOFOLLOW_LINKS))
+        for (ref in manifest.objects()) {
+            putObject(ref, Files.newInputStream(other.objectPath(ref.hash), NOFOLLOW_LINKS))
         }
         saveManifest(manifest)
     }
@@ -140,6 +148,34 @@ class WorldRepository(base: Path) {
 
     fun recover() = locked { recoverLocked() }
 
+    /** Удаляет только объекты, на которые не ссылается ни один сохранённый манифест. */
+    fun pruneUnreferencedObjects(): Int = locked {
+        recoverLocked()
+        readActive() // Проверяем указатель перед любой очисткой.
+        val referenced = mutableSetOf<String>()
+        Files.list(versions).use { files ->
+            for (path in files.toList()) {
+                if (!path.fileName.toString().endsWith(".manifest")) throw IOException("Неожиданный файл в каталоге версий: $path")
+                val manifest = WorldManifestIO.read(path)
+                if (manifestPath(manifest.versionId) != path) throw IOException("Имя файла версии не совпадает с ID")
+                manifest.objects().forEach { referenced.add(it.hash.removePrefix("sha256:")) }
+            }
+        }
+        var removed = 0
+        Files.list(objects).use { files ->
+            for (path in files.toList()) {
+                if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException("Неожиданный объект: $path")
+                val name = path.fileName.toString()
+                if (name !in referenced && (name.matches(Regex("[0-9a-f]{64}")) ||
+                            name.startsWith("incoming-") && name.endsWith(".tmp"))) {
+                    Files.delete(path)
+                    removed++
+                }
+            }
+        }
+        removed
+    }
+
     private fun activate(target: WorldManifest, old: WorldManifest?, allowBranch: Boolean) {
         if (old != null && old.worldId != target.worldId) throw IOException("Это другой мир")
         if (!allowBranch && old != null && old.versionId != target.parentVersionId) {
@@ -156,15 +192,19 @@ class WorldRepository(base: Path) {
             when (entry.type) {
                 WorldEntryType.DIRECTORY -> Files.createDirectory(destination)
                 WorldEntryType.FILE -> {
-                    val objectPath = objectPath(entry.hash!!)
-                    if (!matchesObject(objectPath, entry)) throw IOException("Объект повреждён или отсутствует: ${entry.hash}")
-                    Files.newInputStream(objectPath, NOFOLLOW_LINKS).use { input ->
-                        Files.newOutputStream(destination).use { output -> input.copyTo(output, 64 * 1024) }
+                    Files.newOutputStream(destination).use { output ->
+                        val refs = if (target.formatVersion == 1) listOf(WorldObjectRef(entry.hash!!, entry.size))
+                            else entry.blocks.map { WorldObjectRef(it.hash, it.size.toLong()) }
+                        for (ref in refs) {
+                            val objectPath = objectPath(ref.hash)
+                            if (!matchesObject(objectPath, ref)) throw IOException("Объект повреждён или отсутствует: ${ref.hash}")
+                            Files.newInputStream(objectPath, NOFOLLOW_LINKS).use { it.copyTo(output, 64 * 1024) }
+                        }
                     }
                 }
             }
         }
-        if (WorldScanner.scan(stage, target.worldId, target.parentVersionId) != target) {
+        if (WorldScanner.scan(stage, target.worldId, target.parentVersionId, target.formatVersion) != target) {
             throw IOException("Собранная версия не совпадает с манифестом")
         }
         if (Files.exists(previous, NOFOLLOW_LINKS)) deleteTree(previous)
@@ -193,13 +233,13 @@ class WorldRepository(base: Path) {
     }
 
     private fun matchesWorking(manifest: WorldManifest): Boolean = try {
-        Files.isDirectory(work, NOFOLLOW_LINKS) && WorldScanner.scan(work, manifest.worldId, manifest.parentVersionId) == manifest
+        Files.isDirectory(work, NOFOLLOW_LINKS) && WorldScanner.scan(work, manifest.worldId, manifest.parentVersionId, manifest.formatVersion) == manifest
     } catch (_: IOException) { false }
 
-    private fun putObject(entry: WorldEntry, source: InputStream, skipExisting: Boolean = true) {
+    private fun putObject(ref: WorldObjectRef, source: InputStream, skipExisting: Boolean = true) {
         source.use { input ->
-            val path = objectPath(entry.hash!!)
-            if (skipExisting && Files.exists(path, NOFOLLOW_LINKS) && matchesObject(path, entry)) return
+            val path = objectPath(ref.hash)
+            if (skipExisting && Files.exists(path, NOFOLLOW_LINKS) && matchesObject(path, ref)) return
             val temp = Files.createTempFile(objects, "incoming-", ".tmp")
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -214,16 +254,16 @@ class WorldRepository(base: Path) {
                         output.write(buffer, 0, count)
                     }
                 }
-                if (size != entry.size || "sha256:" + digest.digest().toHex() != entry.hash) {
-                    throw IOException("Содержимое объекта не совпадает с манифестом: ${entry.path}")
+                if (size != ref.size || "sha256:" + digest.digest().toHex() != ref.hash) {
+                    throw IOException("Содержимое объекта не совпадает с манифестом: ${ref.hash}")
                 }
                 Files.move(temp, path, ATOMIC_MOVE, REPLACE_EXISTING)
             } finally { Files.deleteIfExists(temp) }
         }
     }
 
-    private fun matchesObject(path: Path, entry: WorldEntry): Boolean {
-        if (!Files.isRegularFile(path, NOFOLLOW_LINKS) || Files.size(path) != entry.size) return false
+    private fun matchesObject(path: Path, ref: WorldObjectRef): Boolean {
+        if (!Files.isRegularFile(path, NOFOLLOW_LINKS) || Files.size(path) != ref.size) return false
         val digest = MessageDigest.getInstance("SHA-256")
         Files.newInputStream(path, NOFOLLOW_LINKS).use { input ->
             val buffer = ByteArray(64 * 1024)
@@ -233,12 +273,12 @@ class WorldRepository(base: Path) {
                 digest.update(buffer, 0, count)
             }
         }
-        return "sha256:" + digest.digest().toHex() == entry.hash
+        return "sha256:" + digest.digest().toHex() == ref.hash
     }
 
-    private fun requireFile(entry: WorldEntry) {
-        if (entry.type != WorldEntryType.FILE || entry.size < 0 || entry.hash == null) throw IOException("Ожидается файл")
-        WorldManifest.requireHash(entry.hash)
+    private fun requireObject(ref: WorldObjectRef) {
+        if (ref.size < 0) throw IOException("Некорректный размер объекта")
+        WorldManifest.requireHash(ref.hash)
     }
 
     private fun objectPath(hash: String): Path {
