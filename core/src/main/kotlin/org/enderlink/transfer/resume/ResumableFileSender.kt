@@ -13,6 +13,7 @@ import java.security.MessageDigest
 class ResumableFileSender(private val source: Path) {
     internal val size: Long
     internal val hash: ByteArray
+    val operationId: String
     private val blocks = mutableListOf<ByteArray>()
 
     init {
@@ -31,11 +32,18 @@ class ResumableFileSender(private val source: Path) {
             if (input.read() != -1) throw IOException("Исходный файл изменился при сканировании")
         }
         hash = fullHash.digest()
+        operationId = "file-" + ResumeProtocol.hex(ResumeProtocol.digest(ResumeProtocol.header(source.fileName.toString(), size, hash)))
     }
 
     fun send(connection: Connection, progress: (Long, Long) -> Unit = { _, _ -> }) {
         Protocol.send(connection, ResumeProtocol.HEADER, ResumeProtocol.header(source.fileName.toString(), size, hash))
-        Protocol.expect(connection, Protocol.READY)
+        val (ready, readyBody) = ResumeProtocol.response(connection)
+        if (readyBody.isNotEmpty()) throw IOException("Некорректный ответ на заголовок файла")
+        if (ready == ResumeProtocol.COMPLETE) {
+            progress(size, size)
+            return
+        }
+        if (ready != Protocol.READY) throw IOException("Получатель не готов принять файл")
         RandomAccessFile(source.toFile(), "r").use { input ->
             if (input.length() != size) throw IOException("Исходный файл изменился")
             var done = 0L

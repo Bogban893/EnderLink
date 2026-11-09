@@ -22,7 +22,15 @@ class ResumableFileReceiver {
         Files.createDirectories(directory)
         val root = directory.toRealPath()
         val target = root.resolve(header.name)
-        if (Files.exists(target, NOFOLLOW_LINKS)) throw IOException("Файл уже существует: $target")
+        if (Files.exists(target, NOFOLLOW_LINKS)) {
+            if (!Files.isRegularFile(target, NOFOLLOW_LINKS) || Files.size(target) != header.size ||
+                !MessageDigest.isEqual(hashFile(target, connection), header.hash)) {
+                throw IOException("Файл уже существует и отличается: $target")
+            }
+            progress(header.size, header.size)
+            Protocol.send(connection, ResumeProtocol.COMPLETE)
+            return target
+        }
         Files.createDirectories(stateDirectory)
         val stateRoot = stateDirectory.toRealPath()
         val key = ResumeProtocol.hex(ResumeProtocol.digest(body))
@@ -118,5 +126,19 @@ class ResumableFileReceiver {
                 return target
             }
         }
+    }
+
+    private fun hashFile(path: Path, connection: Connection): ByteArray {
+        val hash = MessageDigest.getInstance("SHA-256")
+        Files.newInputStream(path, NOFOLLOW_LINKS).use { input ->
+            val buffer = ByteArray(ResumeProtocol.BLOCK_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count == -1) break
+                hash.update(buffer, 0, count)
+                Protocol.send(connection, ResumeProtocol.VERIFYING)
+            }
+        }
+        return hash.digest()
     }
 }

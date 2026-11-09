@@ -13,6 +13,7 @@ internal object ResumeProtocol {
     const val HAVE = 12
     const val NEED = 13
     const val VERIFYING = 16
+    const val COMPLETE = 17
     fun response(connection: org.enderlink.network.connection.Connection): Pair<Int, ByteArray> {
         while (true) {
             val message = org.enderlink.transfer.protocol.TransferProtocol.read(connection)

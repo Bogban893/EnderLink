@@ -24,7 +24,7 @@ class ResumableFileTransferTest {
     private val blockSize = ResumeProtocol.BLOCK_SIZE
 
     /** Новый sender/receiver и новые TCP-сокеты на каждую попытку. */
-    private fun attempt(source: Path, output: Path, dropAt: Int? = null, rejectExisting: Boolean = false): Int {
+    private fun attempt(source: Path, output: Path, dropAt: Int? = null, rejectExisting: Boolean = false, dropSuccess: Boolean = false): Int {
         val sender = ResumableFileSender(source)
         var sent = 0
         TcpListener.open(0, "127.0.0.1").use { listener ->
@@ -48,14 +48,23 @@ class ResumableFileTransferTest {
                     try {
                         val receiving = executor.submit {
                             server.use {
-                                if (dropAt != null || rejectExisting) {
-                                    assertFailsWith<IOException> { TransferReceiver().receive(it, output) }
+                                val receivingConnection = object : Connection by it {
+                                    override fun send(payload: ByteArray) {
+                                        if (dropSuccess && payload.size > 4 && payload[4].toInt() == 5) {
+                                            it.close()
+                                            throw IOException("Имитируем потерю подтверждения")
+                                        }
+                                        it.send(payload)
+                                    }
+                                }
+                                if (dropAt != null || rejectExisting || dropSuccess) {
+                                    assertFailsWith<IOException> { TransferReceiver().receive(receivingConnection, output) }
                                 } else {
-                                    TransferReceiver().receive(it, output)
+                                    TransferReceiver().receive(receivingConnection, output)
                                 }
                             }
                         }
-                        if (dropAt != null || rejectExisting) {
+                        if (dropAt != null || rejectExisting || dropSuccess) {
                             assertFailsWith<IOException> { sender.send(transport) }
                         } else sender.send(transport)
                         receiving.get(8, TimeUnit.SECONDS)
@@ -124,6 +133,17 @@ class ResumableFileTransferTest {
         Files.write(output.resolve("source"), byteArrayOf(9))
         attempt(source, output, rejectExisting = true)
         assertContentEquals(byteArrayOf(9), Files.readAllBytes(output.resolve("source")))
+    }
+
+    @Test
+    fun `потеря подтверждения не создаёт второй файл`() {
+        val source = Files.write(root.resolve("source"), byteArrayOf(1, 2, 3))
+        val output = root.resolve("out")
+        attempt(source, output, dropSuccess = true)
+        val target = output.resolve("source")
+        assertContentEquals(Files.readAllBytes(source), Files.readAllBytes(target))
+        assertEquals(0, attempt(source, output))
+        assertEquals(1L, Files.list(output).use { it.filter { path -> Files.isRegularFile(path) && path.fileName.toString() == "source" }.count() })
     }
 
     @Test

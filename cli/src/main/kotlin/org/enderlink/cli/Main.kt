@@ -19,8 +19,8 @@ private const val HELP = """EnderLink — чат, файлы и версии м�
 TCP:
   listen [--host <адрес>] [--port <порт>]
   connect --host <адрес> [--port <порт>]
-  receive --output <каталог> [--host <адрес>] [--port <порт>]
-  send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>]
+  receive --output <каталог> [--host <адрес>] [--port <порт>] [--retries <0..5>]
+  send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>] [--retries <0..5>]
   world-publish --source <закрытый мир> --repository <каталог>
   world-status --repository <каталог>
   world-checkout --repository <каталог> --version <ID>
@@ -31,14 +31,14 @@ TCP:
   add <имя> <ID> | remove <имя>
   listen --iroh [--peer <имя>]
   connect --peer <имя> [--relay <https://адрес>]
-  receive --iroh --output <каталог> [--peer <имя>]
-  send --peer <имя> (--file <путь> | --directory <каталог>) [--relay <https://адрес>]
+  receive --iroh --output <каталог> [--peer <имя>] [--retries <0..5>]
+  send --peer <имя> (--file <путь> | --directory <каталог>) [--relay <https://адрес>] [--retries <0..5>]
   world-receive --repository <каталог> --iroh [--peer <имя>]
   world-send --repository <каталог> --peer <имя> [--relay <https://адрес>]
 
 Для iroh: --profile <каталог>, --debug (сеть). Профиль по умолчанию: ~/.enderlink/iroh-test.
 Оба участника один раз добавляют ID друг друга. Relay после успеха запоминается.
-TCP-порт по умолчанию: 25570. Каждая команда обслуживает одно соединение.
+TCP-порт по умолчанию: 25570. Передача возобновляется после разрыва, по умолчанию 2 повтора.
 Для выхода из чата: /quit или конец стандартного ввода.
 """
 
@@ -50,6 +50,7 @@ data class CliOptions(
     val friendName: String? = null, val friendId: String? = null,
     val repository: String? = null, val source: String? = null,
     val version: String? = null,
+    val retries: Int = 2,
 )
 
 fun parseArguments(args: Array<String>): CliOptions {
@@ -68,8 +69,8 @@ fun parseArguments(args: Array<String>): CliOptions {
     } else {
         val base = setOf("--host", "--port", "--iroh", "--peer", "--profile", "--debug")
         when (command) {
-            "send" -> base + setOf("--file", "--directory", "--relay")
-            "receive" -> base + "--output"
+            "send" -> base + setOf("--file", "--directory", "--relay", "--retries")
+            "receive" -> base + setOf("--output", "--retries")
             "connect" -> base + "--relay"
             "world-send" -> base + setOf("--repository", "--relay")
             "world-receive" -> base + "--repository"
@@ -112,9 +113,11 @@ fun parseArguments(args: Array<String>): CliOptions {
     if (command == "world-checkout") require(!options["--version"].isNullOrBlank()) { "Необходим --version" }
     val port = options["--port"]?.let { requireNotNull(it.toIntOrNull()) { "Порт должен быть целым числом" } } ?: 25570
     require(port in 1..65535) { "Порт должен быть в диапазоне 1..65535" }
+    val retries = options["--retries"]?.toIntOrNull() ?: if ("--retries" in options) throw IllegalArgumentException("Число повторов должно быть целым") else 2
+    require(retries in 0..5) { "Число повторов должно быть от 0 до 5" }
     return CliOptions(command, host, port, options["--file"], options["--output"], options["--directory"],
         iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1),
-        options["--repository"], options["--source"], options["--version"])
+        options["--repository"], options["--source"], options["--version"], retries)
 }
 
 fun main(args: Array<String>) {

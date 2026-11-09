@@ -11,10 +11,19 @@ class ReceiveCommand {
     fun run(options: CliOptions) {
         val directory = Path.of(requireNotNull(options.output))
         Files.createDirectories(directory)
-        withConnection(options, IrohPurpose.TRANSFER) { connection ->
-            val progress = TransferProgress()
-            val saved = TransferReceiver().receive(connection, directory, progress::update)
-            println("Сохранено: $saved. SHA-256 файлов проверен.")
+        var operationId: String? = null
+        val saved = retryTransfer(options.retries, receiving = true) { attempt ->
+            withConnection(options, IrohPurpose.TRANSFER, if (attempt == 0) 0 else 30_000) { connection ->
+                val progress = TransferProgress()
+                TransferReceiver().receive(connection, directory,
+                    expectedOperationId = operationId,
+                    onOperation = { id ->
+                        if (operationId == null) println("Приём операции $id")
+                        operationId = id
+                    },
+                    progress = progress::update)
+            }
         }
+        println("Сохранено: $saved. SHA-256 файлов проверен.")
     }
 }

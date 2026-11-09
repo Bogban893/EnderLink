@@ -68,6 +68,10 @@ class CliArgumentsTest {
             CliOptions("receive", null, 25570, output = "received"),
             parseArguments(arrayOf("receive", "--output", "received")),
         )
+        assertEquals(5, parseArguments(arrayOf("receive", "--output", "received", "--retries", "5")).retries)
+        assertFailsWith<IllegalArgumentException> {
+            parseArguments(arrayOf("send", "--host", "localhost", "--file", "source", "--retries", "6"))
+        }
     }
 
     @Test

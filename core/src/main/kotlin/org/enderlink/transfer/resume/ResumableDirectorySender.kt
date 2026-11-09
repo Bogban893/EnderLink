@@ -17,6 +17,7 @@ class ResumableDirectorySender(source: Path) {
     private val files = mutableMapOf<String, ResumableFileSender>()
     private val entries = mutableListOf<DirectoryManifest.Entry>()
     private val header: ByteArray
+    val operationId: String get() = "directory-" + ResumeProtocol.hex(ResumeProtocol.digest(header))
     init {
         if (!Files.isDirectory(root, NOFOLLOW_LINKS)) throw IOException("Не найден обычный каталог: $source")
         val name = root.fileName?.toString() ?: throw IOException("Нельзя отправлять корень файловой системы")
@@ -50,7 +51,13 @@ class ResumableDirectorySender(source: Path) {
         Protocol.send(connection, DirectoryManifest.HEADER, header)
         Protocol.expect(connection, Protocol.READY)
         for (entry in entries) Protocol.send(connection, DirectoryManifest.ENTRY, entry.encode())
-        Protocol.expect(connection, Protocol.READY)
+        val (manifestAnswer, manifestBody) = ResumeProtocol.response(connection)
+        if (manifestBody.isNotEmpty()) throw IOException("Некорректный ответ на манифест")
+        if (manifestAnswer == ResumeProtocol.COMPLETE) {
+            progress(total, total)
+            return
+        }
+        if (manifestAnswer != Protocol.READY) throw IOException("Получатель не готов принять каталог")
         var done = 0L
         progress(0, total)
         for (entry in entries.filter { !it.directory }) {

@@ -29,7 +29,12 @@ class IrohNode internal constructor(
         prepare(dialFriend(endpoint, profile, target, relay, log), purpose, true)
     }
 
-    fun accept(purpose: IrohPurpose = IrohPurpose.CHAT, friend: String? = null): IrohConnection = blocking {
+    fun accept(purpose: IrohPurpose = IrohPurpose.CHAT, friend: String? = null, timeoutMs: Long = 0): IrohConnection = blocking {
+        require(timeoutMs >= 0) { "Таймаут не может быть отрицательным" }
+        if (timeoutMs == 0L) acceptIncoming(purpose, friend) else withTimeout(timeoutMs) { acceptIncoming(purpose, friend) }
+    }
+
+    private suspend fun acceptIncoming(purpose: IrohPurpose, friend: String?): IrohConnection {
         val expectedId = friend?.let(profile::friendId)
         require(profile.friends().isNotEmpty()) { "Сначала добавьте друга командой add <имя> <ID>" }
         log("Ожидание сохранённого друга…")
@@ -44,7 +49,7 @@ class IrohNode internal constructor(
             val name = profile.friendName(id)
             if (name != null && (expectedId == null || expectedId == id)) {
                 log("Подключился друг $name ($id)")
-                return@blocking prepare(connection, purpose, false)
+                return prepare(connection, purpose, false)
             }
             log("Отклонён неожидаемый ID: $id")
             try { connection.close(1L, "unknown friend".toByteArray()) } finally { connection.close() }

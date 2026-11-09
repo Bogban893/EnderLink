@@ -23,7 +23,6 @@ class ResumableDirectoryReceiver {
         Files.createDirectories(directory)
         val root = directory.toRealPath()
         val target = TransferPaths.resolve(root, header.name)
-        if (Files.exists(target, NOFOLLOW_LINKS)) throw IOException("Каталог уже существует: $target")
         FileChannel.open(root.resolve(".enderlink-directory.lock"), CREATE, WRITE, NOFOLLOW_LINKS).use { channel ->
             val lock = try { channel.tryLock() } catch (e: java.nio.channels.OverlappingFileLockException) { null }
                 ?: throw IOException("В этом каталоге уже принимается дерево")
@@ -46,6 +45,13 @@ class ResumableDirectoryReceiver {
                 }
                 if (total != header.total || !MessageDigest.isEqual(DirectoryManifest.hash(entries), header.hash)) {
                     throw IOException("Манифест каталога повреждён")
+                }
+                if (Files.exists(target, NOFOLLOW_LINKS)) {
+                    if (!Files.isDirectory(target, NOFOLLOW_LINKS)) throw IOException("Каталог уже существует и отличается: $target")
+                    verifyTree(target, entries, connection)
+                    progress(total, total)
+                    Protocol.send(connection, ResumeProtocol.COMPLETE)
+                    return target
                 }
                 val cache = root.resolve(".enderlink-directory-${ResumeProtocol.hex(ResumeProtocol.digest(body))}")
                 ensureDirectory(cache)
@@ -84,32 +90,36 @@ class ResumableDirectoryReceiver {
                 }
                 Protocol.expect(connection, Protocol.DIRECTORY_END)
                 // Проверяем также лишние файлы и изменения состояния на диске.
-                val expected = entries.associateBy { it.path }
-                var seen = 0
-                Files.walkFileTree(tree, object : SimpleFileVisitor<Path>() {
-                    override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                        if (dir != tree) {
-                            val key = tree.relativize(dir).joinToString("/") { it.toString() }
-                            if (expected[key]?.directory != true) throw IOException("Неожиданный каталог в сохранённом дереве")
-                            seen++
-                        }
-                        return FileVisitResult.CONTINUE
-                    }
-                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                        val key = tree.relativize(file).joinToString("/") { it.toString() }
-                        val entry = expected[key] ?: throw IOException("Неожиданный файл в сохранённом дереве")
-                        if (entry.directory || !matches(file, entry, connection)) throw IOException("Сохранённый файл повреждён")
-                        seen++
-                        return FileVisitResult.CONTINUE
-                    }
-                })
-                if (seen != entries.size) throw IOException("Состав каталога не совпадает")
+                verifyTree(tree, entries, connection)
                 Files.move(tree, target)
                 deleteState(cache)
                 Protocol.send(connection, Protocol.SUCCESS)
                 return target
             }
         }
+    }
+
+    private fun verifyTree(tree: Path, entries: List<DirectoryManifest.Entry>, connection: Connection) {
+        val expected = entries.associateBy { it.path }
+        var seen = 0
+        Files.walkFileTree(tree, object : SimpleFileVisitor<Path>() {
+            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                if (dir != tree) {
+                    val key = tree.relativize(dir).joinToString("/") { it.toString() }
+                    if (expected[key]?.directory != true) throw IOException("Неожиданный каталог в сохранённом дереве")
+                    seen++
+                }
+                return FileVisitResult.CONTINUE
+            }
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                val key = tree.relativize(file).joinToString("/") { it.toString() }
+                val entry = expected[key] ?: throw IOException("Неожиданный файл в сохранённом дереве")
+                if (entry.directory || !matches(file, entry, connection)) throw IOException("Сохранённый файл повреждён")
+                seen++
+                return FileVisitResult.CONTINUE
+            }
+        })
+        if (seen != entries.size) throw IOException("Состав каталога не совпадает")
     }
 
     private fun ensureDirectory(path: Path) {

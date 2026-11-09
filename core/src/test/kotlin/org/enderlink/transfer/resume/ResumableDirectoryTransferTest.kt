@@ -46,7 +46,7 @@ class ResumableDirectoryTransferTest {
         }
     }
 
-    private fun attempt(source: Path, output: Path, dropAt: Int? = null, reject: Boolean = false): Int {
+    private fun attempt(source: Path, output: Path, dropAt: Int? = null, reject: Boolean = false, dropSuccess: Boolean = false): Int {
         val sender = ResumableDirectorySender(source)
         var dataMessages = 0
         pair { client, server ->
@@ -66,12 +66,22 @@ class ResumableDirectoryTransferTest {
             try {
                 val receiving = executor.submit {
                     server.use {
-                        if (dropAt != null || reject) {
-                            assertFailsWith<IOException> { TransferReceiver().receive(it, output) }
-                        } else TransferReceiver().receive(it, output)
+                        val receivingConnection = object : Connection by it {
+                            override fun send(payload: ByteArray) {
+                                if (dropSuccess && Files.exists(output.resolve(source.fileName)) &&
+                                    payload.size > 4 && payload[4].toInt() == Protocol.SUCCESS) {
+                                    it.close()
+                                    throw IOException("Имитируем потерю подтверждения")
+                                }
+                                it.send(payload)
+                            }
+                        }
+                        if (dropAt != null || reject || dropSuccess) {
+                            assertFailsWith<IOException> { TransferReceiver().receive(receivingConnection, output) }
+                        } else TransferReceiver().receive(receivingConnection, output)
                     }
                 }
-                if (dropAt != null || reject) assertFailsWith<IOException> { sender.send(counted) }
+                if (dropAt != null || reject || dropSuccess) assertFailsWith<IOException> { sender.send(counted) }
                 else sender.send(counted)
                 receiving.get(10, TimeUnit.SECONDS)
             } finally { executor.shutdownNow() }
@@ -135,8 +145,28 @@ class ResumableDirectoryTransferTest {
         val output = root.resolve("out")
         assertEquals(0, attempt(source, output))
         assertTree(source, output.resolve("empty"))
-        attempt(source, output, reject = true)
+        assertEquals(0, attempt(source, output))
         assertTree(source, output.resolve("empty"))
+    }
+
+    @Test
+    fun `потеря подтверждения не создаёт второй каталог`() {
+        val source = source()
+        val output = root.resolve("out")
+        attempt(source, output, dropSuccess = true)
+        assertTree(source, output.resolve(source.fileName))
+        assertEquals(0, attempt(source, output))
+        assertTree(source, output.resolve(source.fileName))
+    }
+
+    @Test
+    fun `отличающийся готовый каталог не перезаписывается`() {
+        val source = source()
+        val output = root.resolve("out")
+        attempt(source, output)
+        val unexpected = Files.writeString(output.resolve(source.fileName).resolve("extra"), "local")
+        attempt(source, output, reject = true)
+        assertEquals("local", Files.readString(unexpected))
     }
 
     @Test
