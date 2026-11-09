@@ -76,8 +76,9 @@ data class WorldManifest(
         internal fun validatePath(path: String) {
             if (path.isEmpty() || path.split('/').any { part ->
                     part.isEmpty() || part == "." || part == ".." || part.endsWith('.') || part.endsWith(' ') ||
-                        part.any { it == '\\' || it == ':' || it.isISOControl() } ||
-                        part.substringBefore('.').uppercase() in setOf("CON", "PRN", "AUX", "NUL", "COM1", "LPT1")
+                        part.any { it in "\\:<>\"|?*" || it.isISOControl() } ||
+                        part.substringBefore('.').uppercase() in
+                        (setOf("CON", "PRN", "AUX", "NUL") + (1..9).flatMap { listOf("COM$it", "LPT$it") })
                 }) throw IOException("Недопустимый путь мира: $path")
         }
 
