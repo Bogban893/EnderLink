@@ -51,6 +51,36 @@ class WorldRepository(base: Path) {
 
     fun load(versionId: String): WorldManifest = locked { loadManifest(versionId) }
 
+    fun verifyCurrent() = locked {
+        recoverLocked()
+        val manifest = readActive() ?: throw IOException("Мир ещё не опубликован")
+        if (!matchesWorking(manifest)) throw IOException("Рабочая копия мира отличается от опубликованной версии")
+    }
+
+    fun record(manifest: WorldManifest) = locked {
+        manifest.validate()
+        val local = readActive()
+        if (local != null && local.worldId != manifest.worldId) throw IOException("Это другой мир")
+        saveManifest(manifest)
+    }
+
+    fun hasObject(entry: WorldEntry): Boolean = locked {
+        requireFile(entry)
+        matchesObject(objectPath(entry.hash!!), entry)
+    }
+
+    fun openObject(entry: WorldEntry): InputStream = locked {
+        requireFile(entry)
+        val path = objectPath(entry.hash!!)
+        if (!matchesObject(path, entry)) throw IOException("Объект повреждён или отсутствует: ${entry.hash}")
+        Files.newInputStream(path, NOFOLLOW_LINKS)
+    }
+
+    fun storeObject(entry: WorldEntry, source: InputStream) = locked {
+        requireFile(entry)
+        putObject(entry, source, skipExisting = false)
+    }
+
     fun plan(target: WorldManifest): WorldUpdatePlan = locked {
         recoverLocked()
         target.validate()
@@ -112,8 +142,8 @@ class WorldRepository(base: Path) {
 
     private fun activate(target: WorldManifest, old: WorldManifest?, allowBranch: Boolean) {
         if (old != null && old.worldId != target.worldId) throw IOException("Это другой мир")
-        if (!allowBranch && old?.versionId != target.parentVersionId) {
-            throw WorldConflictException(old?.versionId, target.versionId)
+        if (!allowBranch && old != null && old.versionId != target.parentVersionId) {
+            throw WorldConflictException(old.versionId, target.versionId)
         }
         if (old != null && !matchesWorking(old)) throw IOException("Рабочий мир изменён после публикации; сначала опубликуйте его отдельной версией")
         if (old == null && Files.exists(work, NOFOLLOW_LINKS)) throw IOException("Рабочий каталог уже существует без версии")
@@ -166,13 +196,10 @@ class WorldRepository(base: Path) {
         Files.isDirectory(work, NOFOLLOW_LINKS) && WorldScanner.scan(work, manifest.worldId, manifest.parentVersionId) == manifest
     } catch (_: IOException) { false }
 
-    private fun putObject(entry: WorldEntry, source: InputStream) {
+    private fun putObject(entry: WorldEntry, source: InputStream, skipExisting: Boolean = true) {
         source.use { input ->
             val path = objectPath(entry.hash!!)
-            if (Files.exists(path, NOFOLLOW_LINKS)) {
-                if (!matchesObject(path, entry)) throw IOException("Существующий объект повреждён: ${entry.hash}")
-                return
-            }
+            if (skipExisting && Files.exists(path, NOFOLLOW_LINKS) && matchesObject(path, entry)) return
             val temp = Files.createTempFile(objects, "incoming-", ".tmp")
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -190,7 +217,7 @@ class WorldRepository(base: Path) {
                 if (size != entry.size || "sha256:" + digest.digest().toHex() != entry.hash) {
                     throw IOException("Содержимое объекта не совпадает с манифестом: ${entry.path}")
                 }
-                Files.move(temp, path, ATOMIC_MOVE)
+                Files.move(temp, path, ATOMIC_MOVE, REPLACE_EXISTING)
             } finally { Files.deleteIfExists(temp) }
         }
     }
@@ -207,6 +234,11 @@ class WorldRepository(base: Path) {
             }
         }
         return "sha256:" + digest.digest().toHex() == entry.hash
+    }
+
+    private fun requireFile(entry: WorldEntry) {
+        if (entry.type != WorldEntryType.FILE || entry.size < 0 || entry.hash == null) throw IOException("Ожидается файл")
+        WorldManifest.requireHash(entry.hash)
     }
 
     private fun objectPath(hash: String): Path {

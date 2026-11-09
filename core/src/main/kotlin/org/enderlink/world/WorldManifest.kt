@@ -34,6 +34,7 @@ data class WorldManifest(
         requireHash(versionId)
         var previous: String? = null
         val types = mutableMapOf<String, WorldEntryType>()
+        val objectSizes = mutableMapOf<String, Long>()
         for (entry in entries) {
             validatePath(entry.path)
             if (previous != null && previous >= entry.path) throw IOException("Манифест не отсортирован или содержит повтор пути")
@@ -46,6 +47,8 @@ data class WorldManifest(
                 WorldEntryType.FILE -> {
                     if (entry.size < 0 || entry.hash == null) throw IOException("Некорректный файл")
                     requireHash(entry.hash)
+                    val knownSize = objectSizes.putIfAbsent(entry.hash, entry.size)
+                    if (knownSize != null && knownSize != entry.size) throw IOException("Один хеш имеет разные размеры")
                 }
             }
         }
