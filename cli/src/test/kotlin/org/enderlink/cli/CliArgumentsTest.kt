@@ -11,9 +11,11 @@ class CliArgumentsTest {
         assertEquals("world", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).source)
         assertEquals(true, parseArguments(arrayOf("world-receive", "--repository", "repo", "--iroh")).iroh)
         assertEquals("friend", parseArguments(arrayOf("world-send", "--repository", "repo", "--peer", "friend")).peer)
+        assertEquals("sha256:id", parseArguments(arrayOf("world-checkout", "--repository", "repo", "--version", "sha256:id")).version)
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-send", "--repository", "repo")) }
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-receive", "--output", "out")) }
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-publish", "--repository", "repo", "--host", "localhost")) }
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-checkout", "--repository", "repo")) }
     }
     @Test
     fun `iroh выбирается по другу а TCP параметры не смешиваются с ним`() {

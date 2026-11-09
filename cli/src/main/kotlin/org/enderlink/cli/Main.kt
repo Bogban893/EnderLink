@@ -13,7 +13,7 @@ import kotlin.system.exitProcess
 
 private val networkCommands = setOf("listen", "connect", "send", "receive", "world-send", "world-receive")
 private val profileCommands = setOf("id", "add", "friends", "remove")
-private val localWorldCommands = setOf("world-publish", "world-status")
+private val localWorldCommands = setOf("world-publish", "world-status", "world-checkout")
 private val commands = networkCommands + profileCommands + localWorldCommands
 private const val HELP = """EnderLink — чат, файлы и версии мира по TCP или через интернет (iroh)
 TCP:
@@ -23,6 +23,7 @@ TCP:
   send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>]
   world-publish --source <закрытый мир> --repository <каталог>
   world-status --repository <каталог>
+  world-checkout --repository <каталог> --version <ID>
   world-receive --repository <каталог> [--host <адрес>] [--port <порт>]
   world-send --repository <каталог> --host <адрес> [--port <порт>]
 Интернет:
@@ -48,6 +49,7 @@ data class CliOptions(
     val relay: String? = null, val debug: Boolean = false,
     val friendName: String? = null, val friendId: String? = null,
     val repository: String? = null, val source: String? = null,
+    val version: String? = null,
 )
 
 fun parseArguments(args: Array<String>): CliOptions {
@@ -58,7 +60,11 @@ fun parseArguments(args: Array<String>): CliOptions {
     val positional = args.drop(1).take(positionalCount)
     require(positional.all { it.isNotBlank() && !it.startsWith("--") }) { "Укажите имя и ID друга для add, имя для remove" }
     val allowed = if (command in profileCommands) setOf("--profile") else if (command in localWorldCommands) {
-        if (command == "world-publish") setOf("--repository", "--source") else setOf("--repository")
+        when (command) {
+            "world-publish" -> setOf("--repository", "--source")
+            "world-checkout" -> setOf("--repository", "--version")
+            else -> setOf("--repository")
+        }
     } else {
         val base = setOf("--host", "--port", "--iroh", "--peer", "--profile", "--debug")
         when (command) {
@@ -103,11 +109,12 @@ fun parseArguments(args: Array<String>): CliOptions {
     if (command == "receive") require(!options["--output"].isNullOrBlank()) { "Необходим --output" }
     if (command.startsWith("world-")) require(!options["--repository"].isNullOrBlank()) { "Необходим --repository" }
     if (command == "world-publish") require(!options["--source"].isNullOrBlank()) { "Необходим --source" }
+    if (command == "world-checkout") require(!options["--version"].isNullOrBlank()) { "Необходим --version" }
     val port = options["--port"]?.let { requireNotNull(it.toIntOrNull()) { "Порт должен быть целым числом" } } ?: 25570
     require(port in 1..65535) { "Порт должен быть в диапазоне 1..65535" }
     return CliOptions(command, host, port, options["--file"], options["--output"], options["--directory"],
         iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1),
-        options["--repository"], options["--source"])
+        options["--repository"], options["--source"], options["--version"])
 }
 
 fun main(args: Array<String>) {
@@ -122,7 +129,7 @@ fun main(args: Array<String>) {
             "connect" -> ConnectCommand().run(options)
             "send" -> SendCommand().run(options)
             "receive" -> ReceiveCommand().run(options)
-            "world-publish", "world-status", "world-send", "world-receive" -> WorldCommand().run(options)
+            "world-publish", "world-status", "world-checkout", "world-send", "world-receive" -> WorldCommand().run(options)
             else -> IrohProfile.open(options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()).use { profile ->
                 when (options.command) {
                     "id" -> println("Ваш ID: ${profile.id}")

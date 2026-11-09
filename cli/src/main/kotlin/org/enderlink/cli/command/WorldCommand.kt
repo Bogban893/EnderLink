@@ -21,13 +21,20 @@ class WorldCommand {
                 if (manifest == null) println("Версия мира пока не опубликована")
                 else println("Мир: ${manifest.worldId}\nВерсия: ${manifest.versionId}\nРодитель: ${manifest.parentVersionId ?: "нет"}\nРабочий мир: ${repository.workingDirectory}")
             }
+            "world-checkout" -> {
+                val id = requireNotNull(options.version)
+                repository.checkout(id)
+                println("Активирована версия $id: ${repository.workingDirectory}")
+            }
             "world-send" -> withConnection(options, IrohPurpose.TRANSFER) { connection ->
                 val stats = WorldTransfer.send(repository, connection, TransferProgress()::update)
                 println("Версия ${stats.versionId} подтверждена. Передано ${stats.transferredBytes} байт, использовано повторно ${stats.reusedBytes} байт.")
+                println("Сеть → получателю: ${stats.wireSentBytes} байт (данные ${stats.transferredBytes}, метаданные и кадры ${stats.wireSentBytes - stats.transferredBytes}); ← ответы: ${stats.wireReceivedBytes} байт.")
             }
             "world-receive" -> withConnection(options, IrohPurpose.TRANSFER) { connection ->
                 val stats = WorldTransfer.receive(repository, connection, TransferProgress()::update)
                 println("Версия ${stats.versionId} активирована: ${repository.workingDirectory}. Получено ${stats.transferredBytes} байт, использовано повторно ${stats.reusedBytes} байт.")
+                println("Сеть ← отправитель: ${stats.wireReceivedBytes} байт; → ответы: ${stats.wireSentBytes} байт.")
             }
         }
     }
