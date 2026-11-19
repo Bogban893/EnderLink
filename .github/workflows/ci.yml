@@ -31,8 +31,8 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      - name: Assemble all modules and compile tests
-        run: bash ./gradlew assemble testClasses --no-daemon --stacktrace
+      - name: Build
+        run: bash ./gradlew assemble --no-daemon --console=plain
 
   test:
     name: Tests (Java 21)
@@ -59,8 +59,8 @@ jobs:
             libx11-6 libxext6 libxfixes3 libxdamage1 libxtst6 \
             libxrandr2 libxcomposite1 libglib2.0-0t64 libgbm1 libdrm2
 
-      - name: Run tests in all modules
-        run: bash ./gradlew test --no-daemon --stacktrace
+      - name: Test
+        run: bash ./gradlew test --no-daemon --console=plain
 
       - name: Upload test reports
         if: always()
