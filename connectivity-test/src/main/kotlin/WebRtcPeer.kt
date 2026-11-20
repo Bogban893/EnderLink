@@ -1,6 +1,8 @@
 package org.enderlink
 
 import dev.onvoid.webrtc.*
+import dev.onvoid.webrtc.media.audio.AudioDeviceModule
+import dev.onvoid.webrtc.media.audio.AudioLayer
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.CompletableFuture
@@ -22,7 +24,13 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
     @Volatile private var channel: RTCDataChannel? = null
     @Volatile private var localCandidates = "ещё не собраны"
     @Volatile private var remoteCandidates = "ещё не получены"
-    private val factory = PeerConnectionFactory()
+    private val audioModule = AudioDeviceModule(AudioLayer.kDummyAudio)
+    private val factory = try {
+        PeerConnectionFactory(audioModule)
+    } catch (e: Throwable) {
+        audioModule.dispose()
+        throw e
+    }
     private val peer: RTCPeerConnection
 
     init {
@@ -56,7 +64,7 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
                 override fun onDataChannel(dataChannel: RTCDataChannel) = attach(dataChannel)
             })
         } catch (e: Throwable) {
-            factory.dispose()
+            try { factory.dispose() } finally { audioModule.dispose() }
             throw e
         }
     }
@@ -170,7 +178,7 @@ internal class WebRtcPeer(stun: String?, private val log: (String) -> Unit = {})
                 try {
                     channel?.let { it.unregisterObserver(); it.dispose() }
                 } finally {
-                    factory.dispose()
+                    try { factory.dispose() } finally { audioModule.dispose() }
                 }
             }
         }
