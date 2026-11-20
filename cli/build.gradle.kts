@@ -1,8 +1,14 @@
 plugins {
     kotlin("jvm")
+    application
 }
 
-group = "org.example"
+application {
+    mainClass = "org.enderlink.cli.MainKt"
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
+}
+
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -10,6 +16,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":core"))
     testImplementation(kotlin("test"))
 }
 
@@ -19,4 +26,8 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.named<JavaExec>("run") {
+    standardInput = System.`in`
 }

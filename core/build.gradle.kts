@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "org.example"
+group = "org.enderlink"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -10,6 +10,8 @@ repositories {
 }
 
 dependencies {
+    implementation("computer.iroh:iroh:1.2.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation(kotlin("test"))
 }
 
