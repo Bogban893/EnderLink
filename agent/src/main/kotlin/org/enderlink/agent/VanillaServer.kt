@@ -2,6 +2,7 @@ package org.enderlink.agent
 
 import org.enderlink.world.WorldRepository
 import org.enderlink.world.WorldScanner
+import org.enderlink.world.PlayerDataInspector
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -43,12 +44,25 @@ class VanillaServer(
             (!Files.isRegularFile(properties, NOFOLLOW_LINKS) || property(properties, "level-name")?.let { it != "world" } == true)) {
             throw IOException("server.properties должен использовать level-name=world")
         }
+        if (Files.exists(properties, NOFOLLOW_LINKS) &&
+            property(properties, "online-mode")?.equals("true", ignoreCase = true) == false) {
+            throw IOException("Для сохранения данных игроков при смене хоста установите online-mode=true в server.properties")
+        }
         val manifest = repository.current() ?: throw IOException("Сначала опубликуйте версию мира")
         if (requestedVersion != null && manifest.versionId != requestedVersion) {
             throw IOException("Активна версия ${manifest.versionId}; выберите нужную через world-checkout")
         }
         repository.verifyCurrent()
         val source = repository.workingDirectory
+        val players = PlayerDataInspector.inspect(source)
+        if (players.legacyEmbeddedPlayer) {
+            System.err.println("Внимание: level.dat содержит данные владельца старого одиночного мира. " +
+                "Перед игрой проверьте его инвентарь на сервере: отдельный файл UUID мог ещё не быть создан.")
+        }
+        if (players.singleplayerUuid && players.modernPlayerFiles == 0) {
+            System.err.println("Внимание: level.dat ссылается на singleplayer_uuid, но players/data пуст. " +
+                "Проверьте полноту сохранения перед запуском сервера.")
+        }
         val stage = Files.createTempDirectory(root, ".enderlink-world-")
         try {
             Files.walkFileTree(source, object : SimpleFileVisitor<Path>() {
@@ -119,6 +133,13 @@ class VanillaServer(
         if (!running.waitFor(120, TimeUnit.SECONDS)) {
             throw IOException("Сервер не остановился за 120 секунд; мир оставлен в $worldDirectory")
         }
+        return publishStopped()
+    }
+
+    /** Publishes a server that has already stopped cleanly (for example via its own console). */
+    fun publishStopped(): String {
+        val running = process ?: throw IOException("Сервер не запущен")
+        if (running.isAlive) throw IOException("Сервер ещё работает")
         if (running.exitValue() != 0) throw IOException("Сервер завершился с кодом ${running.exitValue()}; мир оставлен в $worldDirectory")
         if (repository.current()?.versionId != versionId) {
             throw IOException("Активная версия репозитория изменилась; мир оставлен в $worldDirectory")

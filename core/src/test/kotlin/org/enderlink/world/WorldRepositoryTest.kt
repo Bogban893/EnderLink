@@ -14,6 +14,18 @@ import kotlin.test.assertTrue
 class WorldRepositoryTest {
     @TempDir lateinit var root: Path
 
+    @Test
+    fun `existing save can seed object store without activating a version`() {
+        val source = Files.createDirectory(root.resolve("local-save"))
+        Files.write(source.resolve("region.mca"), ByteArray(WorldManifest.BLOCK_SIZE * 2) { (it / WorldManifest.BLOCK_SIZE).toByte() })
+        val repo = WorldRepository(root.resolve("receiver"))
+        assertEquals(2, repo.cacheObjectsFrom(source))
+        assertEquals(0, repo.cacheObjectsFrom(source))
+        assertEquals(null, repo.current())
+        val manifest = WorldScanner.scan(source, WorldManifest.newWorldId())
+        assertTrue(manifest.objects().all(repo::hasObject))
+    }
+
     private fun prepare(): Pair<WorldRepository, WorldRepository> {
         val a = WorldRepository(root.resolve("a"))
         val b = WorldRepository(root.resolve("b"))

@@ -54,6 +54,8 @@ class VanillaServerTest {
         Files.writeString(session.resolve("eula.txt"), "eula=true\n")
         Files.writeString(session.resolve("server.properties"), "level-name=another\n")
         assertFailsWith<IOException> { server.prepare() }
+        Files.writeString(session.resolve("server.properties"), "level-name=world\nonline-mode=false\n")
+        assertFailsWith<IOException> { server.prepare() }
         Files.writeString(session.resolve("server.properties"), "level-name=world\n")
         server.prepare()
         assertFailsWith<IOException> { VanillaServer(repository, session, initial).prepare() }
