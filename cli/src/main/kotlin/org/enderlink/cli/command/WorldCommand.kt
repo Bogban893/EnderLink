@@ -9,6 +9,8 @@ import org.enderlink.world.WorldConflictException
 import org.enderlink.worldtransfer.WorldTransfer
 import org.enderlink.worldtransfer.WorldTransferPhase
 import java.nio.file.Path
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.util.UUID
 
 class WorldCommand(
@@ -18,8 +20,19 @@ class WorldCommand(
 ) {
     fun run(options: CliOptions) {
         control.checkCancelled()
+        val root = Path.of(requireNotNull(options.repository))
+        options.source?.let { source ->
+            val origin = Path.of(source)
+            require(Files.isDirectory(origin, NOFOLLOW_LINKS)) { "Не найден обычный каталог исходного мира: $source" }
+            val realSource = origin.toRealPath()
+            val realRepository = resolveExistingParent(root)
+            require(realSource == realRepository.resolve("world") ||
+                !realSource.startsWith(realRepository) && !realRepository.startsWith(realSource)) {
+                "Исходный мир и хранилище не должны пересекаться; допустим только рабочий каталог хранилища world."
+            }
+        }
         if (options.command in setOf("world-publish", "world-checkout", "world-import-owner")) control.protectCommit()
-        val repository = WorldRepository(Path.of(requireNotNull(options.repository)))
+        val repository = WorldRepository(root)
         val progress = TransferProgress("Обработано блоков") { message -> control.checkCancelled(); report(message) }
         when (options.command) {
             "world-versions" -> {
@@ -112,4 +125,11 @@ class WorldCommand(
         }
         if (!players.levelReadable) report("Внимание: структуру level.dat не удалось проверить")
     }
+}
+
+/** Resolve existing parents too, so a new repository beneath a symlink cannot bypass overlap checks. */
+private fun resolveExistingParent(path: Path): Path {
+    val absolute = path.toAbsolutePath().normalize()
+    return if (Files.exists(absolute, NOFOLLOW_LINKS)) absolute.toRealPath()
+    else resolveExistingParent(requireNotNull(absolute.parent)).resolve(absolute.fileName)
 }

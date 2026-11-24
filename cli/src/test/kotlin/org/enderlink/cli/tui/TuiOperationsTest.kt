@@ -28,7 +28,13 @@ class TuiOperationsTest {
         val session = TuiSession()
         session.execute("repository ${TuiWords.quote(path.toString())}")
         assertFalse(Files.exists(path))
+        assertTrue(session.execute("world-versions").error)
+        assertFalse(Files.exists(path))
         val command = "world-publish --source ${TuiWords.quote(source.toString())}"
+        assertTrue(session.execute("$command --closed --repository ${TuiWords.quote(source.resolve("nested-repo").toString())}").error)
+        assertFalse(Files.exists(source.resolve("nested-repo")))
+        assertTrue(session.execute("$command --closed --repository ${TuiWords.quote(source.toString())}").error)
+        assertFalse(Files.exists(source.resolve(".enderlink")))
         assertTrue(session.execute(command).error)
         assertFalse(Files.exists(path))
         assertFalse(session.execute("$command --closed").error)

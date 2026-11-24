@@ -5,16 +5,18 @@ internal data class TuiCommand(
     val minArguments: Int = if (argument == null || optional) 0 else 1,
     val maxArguments: Int = if (argument == null) 0 else 1,
 ) {
-    val usage: String get() = name + (argument?.let { if (optional) " [$it]" else " <$it>" } ?: "")
+    val usage: String get() = name + (argument?.let {
+        if (optional) " [$it]" else if (it.startsWith("--")) " $it" else " <$it>"
+    } ?: "")
 }
 
 /** One catalog for command validation, completion and help. Backslashes are literal, including Windows paths. */
 internal object TuiCommands {
     val all = listOf(
         TuiCommand("help", null, "Справка по интерфейсу"),
-        TuiCommand("repository", "путь", "Выбрать существующее хранилище мира"),
+        TuiCommand("repository", "путь", "Выбрать существующее или новое хранилище мира"),
         TuiCommand("world-status", null, "Обновить состояние выбранного мира"),
-        TuiCommand("profile", "путь", "Выбрать существующий профиль iroh"),
+        TuiCommand("profile", "путь", "Выбрать существующий или новый каталог профиля iroh"),
         TuiCommand("friends", null, "Обновить список сохранённых друзей"),
         TuiCommand("id", null, "Показать ID выбранного профиля"),
         TuiCommand("profile-init", null, "Создать профиль в выбранном каталоге (явное создание ID)"),
@@ -25,7 +27,7 @@ internal object TuiCommands {
         TuiCommand("world-checkout", "--version ID", "Явно выбрать историческую ветку", maxArguments = Int.MAX_VALUE),
         TuiCommand("world-import-owner", "--owner-uuid UUID", "Импортировать владельца старого мира", maxArguments = Int.MAX_VALUE),
         TuiCommand("world-send", "--peer имя | --host адрес [параметры CLI]", "Отправить мир; --source требует --closed", maxArguments = Int.MAX_VALUE),
-        TuiCommand("world-receive", "--iroh | --host адрес [параметры CLI]", "Принять мир; TCP также работает без параметров", minArguments = 0, maxArguments = Int.MAX_VALUE),
+        TuiCommand("world-receive", "--iroh | --host адрес [параметры CLI]", "Принять мир; TCP также работает без параметров", optional = true, minArguments = 0, maxArguments = Int.MAX_VALUE),
         TuiCommand("cancel", null, "Отменить ожидание или передачу"),
         TuiCommand("theme", "mono|ender|btop", "Выбрать тему оформления", optional = true),
         TuiCommand("clear", null, "Очистить результат команд"),

@@ -87,7 +87,7 @@ internal class TuiSession(
                     val options = operations.options(spec.name, arguments, state.repository, state.profile)
                     val path = Path.of(requireNotNull(options.repository)).toAbsolutePath().normalize()
                     if (options.iroh) requireExistingProfile(Path.of(requireNotNull(options.profile)))
-                    if (spec.name !in setOf("world-publish", "world-receive")) readWorld(path)
+                    if (spec.name !in setOf("world-publish", "world-receive")) requireRepository(path)
                     operations.execute(options, report, control)
                     val repository = WorldRepository(path)
                     state.copy(repository = path, world = readWorld(path), versionIds = repository.versions().map { it.versionId },
@@ -124,13 +124,17 @@ internal class TuiSession(
 
 private fun readWorldStatus(path: Path): String {
     if (!Files.exists(path, NOFOLLOW_LINKS)) return "Новое хранилище. Создастся при публикации или приёме."
+    requireRepository(path)
+    val repository = WorldRepository(path)
+    val current = repository.current() ?: return "В хранилище нет опубликованной версии."
+    return "Мир: ${current.worldId}\nВерсия: ${current.versionId}\nРабочая копия: ${repository.workingDirectory}"
+}
+
+private fun requireRepository(path: Path) {
     // WorldRepository creates metadata during construction: reject arbitrary source/saves folders first.
     require(listOf(".enderlink/objects", ".enderlink/versions", ".enderlink/staging").all {
         Files.isDirectory(path.resolve(it), NOFOLLOW_LINKS)
     }) { "Это не хранилище EnderLink: $path" }
-    val repository = WorldRepository(path)
-    val current = repository.current() ?: return "В хранилище нет опубликованной версии."
-    return "Мир: ${current.worldId}\nВерсия: ${current.versionId}\nРабочая копия: ${repository.workingDirectory}"
 }
 
 private fun readProfileStatus(path: Path): Pair<String, Map<String, String>> {

@@ -44,6 +44,7 @@ class IrohNode internal constructor(
             val connection = incoming.use {
                 try { withTimeout(20_000) { it.accept().use { accepting -> accepting.connect() } } }
                 catch (_: kotlinx.coroutines.TimeoutCancellationException) { log("Таймаут входящего подключения"); null }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) { log("Не удалось принять соединение: ${e.message}"); null }
             } ?: continue
             val id = connection.remoteId().use { it.toString() }
