@@ -1,6 +1,7 @@
 package org.enderlink.desktop.ui
 
 import org.enderlink.desktop.i18n.messages
+import org.enderlink.desktop.DesktopBuild
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
@@ -33,7 +34,7 @@ import org.enderlink.desktop.ui.screens.SendScreen
 import org.enderlink.desktop.ui.screens.ServerScreen
 import org.enderlink.desktop.presentation.DesktopController
 
-internal class DesktopFrame : JFrame(messages.text("app.title")) {
+internal class DesktopFrame : JFrame("${messages.text("app.title")} · ${DesktopBuild.label}") {
     private val cards = JPanel(CardLayout()).apply { isOpaque = false }
     private val nav = mutableMapOf<String, JButton>()
     val repositoryField = field()
