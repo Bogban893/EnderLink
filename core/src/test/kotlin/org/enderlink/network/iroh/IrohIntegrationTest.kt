@@ -17,13 +17,48 @@ import java.net.SocketTimeoutException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.*
 
 @Timeout(30)
 class IrohIntegrationTest {
     @TempDir lateinit var root: Path
+
+    @Test
+    fun `interrupting native accept releases its worker without public network services`() {
+        val friend = IrohProfile.open(root.resolve("cancel-friend")).use { it.id }
+        IrohProfile.open(root.resolve("cancel-server")).use { profile ->
+            profile.add("friend", friend)
+            val endpoint = runBlocking {
+                Endpoint.bind(EndpointOptions(preset = presetMinimal(), secretKey = profile.key, alpns = listOf(IROH_ALPN)))
+            }
+            val waiting = CountDownLatch(1)
+            val finished = CountDownLatch(1)
+            val thread = AtomicReference<Thread>()
+            val failure = AtomicReference<Throwable>()
+            IrohNode(endpoint, profile, { if (it == "Ожидание сохранённого друга…") waiting.countDown() }).use { node ->
+                val pool = Executors.newSingleThreadExecutor()
+                try {
+                    pool.submit {
+                        thread.set(Thread.currentThread())
+                        try { node.accept(IrohPurpose.TRANSFER).close() }
+                        catch (error: Throwable) { failure.set(error) }
+                        finally { finished.countDown() }
+                    }
+                    assertTrue(waiting.await(5, TimeUnit.SECONDS))
+                    thread.get().interrupt()
+                    assertTrue(finished.await(5, TimeUnit.SECONDS))
+                    assertIs<IOException>(failure.get())
+                } finally {
+                    pool.shutdownNow()
+                    assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS))
+                }
+            }
+        }
+    }
 
     @Test
     fun `таймаут остановки iroh не скрывает успешный результат`() {
