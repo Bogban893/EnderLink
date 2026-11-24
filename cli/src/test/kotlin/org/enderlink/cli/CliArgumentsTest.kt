@@ -8,6 +8,7 @@ class CliArgumentsTest {
     @Test
     fun `версии мира используют отдельные команды`() {
         assertEquals("repo", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).repository)
+        assertEquals("repo", parseArguments(arrayOf("world-versions", "--repository", "repo")).repository)
         assertEquals("world", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).source)
         assertEquals(true, parseArguments(arrayOf("world-receive", "--repository", "repo", "--iroh")).iroh)
         assertEquals("friend", parseArguments(arrayOf("world-send", "--repository", "repo", "--peer", "friend")).peer)

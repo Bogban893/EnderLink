@@ -15,6 +15,22 @@ class WorldRepositoryTest {
     @TempDir lateinit var root: Path
 
     @Test
+    fun `known versions include unactivated manifests without activating them`() {
+        val (a, b) = prepare()
+        val first = b.current()!!
+        Files.writeString(a.workingDirectory.resolve("level.dat"), "incoming")
+        val incoming = a.publish(a.workingDirectory)
+        b.record(incoming)
+        assertEquals(setOf(first, incoming), b.versions().toSet())
+        assertEquals(first, b.current())
+        assertFailsWith<IOException> { b.checkout(incoming.versionId) }
+        assertEquals(first, b.current())
+        val manifestPath = root.resolve("b/.enderlink/versions/${incoming.versionId.removePrefix("sha256:")}.manifest")
+        Files.writeString(manifestPath, "corrupt")
+        assertFailsWith<IOException> { b.versions() }
+    }
+
+    @Test
     fun `existing save can seed object store without activating a version`() {
         val source = Files.createDirectory(root.resolve("local-save"))
         Files.write(source.resolve("region.mca"), ByteArray(WorldManifest.BLOCK_SIZE * 2) { (it / WorldManifest.BLOCK_SIZE).toByte() })

@@ -55,6 +55,16 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
 
     fun load(versionId: String): WorldManifest = locked { loadManifest(versionId) }
 
+    /** Known manifests, including interrupted incoming versions whose objects may be incomplete. */
+    fun versions(): List<WorldManifest> = locked {
+        Files.newDirectoryStream(versions, "*.manifest").use { paths ->
+            paths.map { path ->
+                if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException("Некорректный файл версии: $path")
+                loadManifest("sha256:" + path.fileName.toString().removeSuffix(".manifest"))
+            }.sortedBy { it.versionId }
+        }
+    }
+
     fun verifyCurrent() = locked {
         recoverLocked()
         val manifest = readActive() ?: throw IOException("Мир ещё не опубликован")

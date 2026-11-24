@@ -6,20 +6,19 @@ import org.enderlink.cli.command.ConnectCommand
 import org.enderlink.cli.command.ListenCommand
 import org.enderlink.cli.command.SendCommand
 import org.enderlink.cli.command.ReceiveCommand
+import org.enderlink.cli.command.ProfileCommand
 import org.enderlink.cli.command.WorldCommand
-import org.enderlink.network.iroh.IrohProfile
 import org.enderlink.network.iroh.validateRelay
 import java.io.IOException
-import java.nio.file.Path
 import kotlin.system.exitProcess
 
 private val networkCommands = setOf("listen", "connect", "send", "receive", "world-send", "world-receive")
 private val profileCommands = setOf("id", "add", "friends", "remove")
-private val localWorldCommands = setOf("world-publish", "world-status", "world-checkout", "world-import-owner")
+private val localWorldCommands = setOf("world-publish", "world-status", "world-versions", "world-checkout", "world-import-owner")
 private val commands = networkCommands + profileCommands + localWorldCommands
 private const val HELP = """EnderLink — чат, файлы и версии мира по TCP или через интернет (iroh)
 Интерактивный интерфейс:
-  tui — панели и командная строка (просмотр миров и друзей)
+  tui — панели, команды, версии и передача миров
 TCP:
   listen [--host <адрес>] [--port <порт>]
   connect --host <адрес> [--port <порт>]
@@ -28,6 +27,7 @@ TCP:
   world-publish --source <закрытый мир> --repository <каталог>
   world-import-owner --repository <каталог> --owner-uuid <UUID>
   world-status --repository <каталог>
+  world-versions --repository <каталог>
   world-checkout --repository <каталог> --version <ID>
   world-receive --repository <каталог> [--host <адрес>] [--port <порт>]
   world-send --repository <каталог> [--source <закрытый мир>] --host <адрес> [--port <порт>]
@@ -155,19 +155,8 @@ fun main(args: Array<String>) {
             "connect" -> ConnectCommand().run(options)
             "send" -> SendCommand().run(options)
             "receive" -> ReceiveCommand().run(options)
-            "world-publish", "world-status", "world-checkout", "world-import-owner", "world-send", "world-receive" -> WorldCommand().run(options)
-            else -> IrohProfile.open(options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()).use { profile ->
-                when (options.command) {
-                    "id" -> println("Ваш ID: ${profile.id}")
-                    "friends" -> {
-                        val friends = profile.friends()
-                        if (friends.isEmpty()) println("Друзей пока нет. Используйте add <имя> <ID>.")
-                        friends.forEach { (name, id) -> println("$name $id") }
-                    }
-                    "add" -> { profile.add(requireNotNull(options.friendName), requireNotNull(options.friendId)); println("Друг сохранён.") }
-                    "remove" -> { profile.remove(requireNotNull(options.friendName)); println("Друг удалён.") }
-                }
-            }
+            "world-publish", "world-status", "world-versions", "world-checkout", "world-import-owner", "world-send", "world-receive" -> WorldCommand().run(options)
+            else -> ProfileCommand().run(options)
         }
     } catch (e: java.nio.file.InvalidPathException) {
         System.err.println("Некорректный путь: ${e.message}"); exitProcess(2)
