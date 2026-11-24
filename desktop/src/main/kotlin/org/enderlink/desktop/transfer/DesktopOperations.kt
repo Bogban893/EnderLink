@@ -1,5 +1,6 @@
 package org.enderlink.desktop.transfer
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.network.connection.Connection
 import org.enderlink.network.connection.Endpoint
 import org.enderlink.network.iroh.IrohNode
@@ -35,7 +36,7 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
         message: (String) -> Unit, progress: (Long, Long) -> Unit,
     ): WorldTransferStats {
         if (source != null) {
-            message("Создаём версию закрытого мира…")
+            message(messages.text("transfer.publishing"))
             repository.publish(source)
         }
         checkActive()
@@ -56,9 +57,9 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
     private fun <T> withConnection(
         target: TransferTarget, receiving: Boolean, message: (String) -> Unit, action: (Connection) -> T,
     ): T {
-        require(target.port in 1..65535) { "Порт должен быть от 1 до 65535" }
+        require(target.port in 1..65535) { messages.text("transfer.port.invalid") }
         if (target.route == Route.FRIEND) {
-            require(target.friend.isNotBlank()) { "Выберите друга" }
+            require(target.friend.isNotBlank()) { messages.text("transfer.friend.required") }
             return IrohProfile.open(profileDirectory).use { profile ->
                 IrohNode.open(profile, log = message).use { node ->
                     track(node)
@@ -83,7 +84,7 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
                 }
             }
         }
-        require(target.host.isNotBlank()) { "Введите адрес получателя" }
+        require(target.host.isNotBlank()) { messages.text("transfer.recipientAddress.required") }
         message("Подключаемся к ${target.host}:${target.port}…")
         return TcpConnection.connect(Endpoint(target.host, target.port)).use { connection ->
             track(connection)
@@ -93,20 +94,20 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
     }
 
     private fun track(resource: AutoCloseable) {
-        if (cancelled) { resource.close(); throw InterruptedException("Операция отменена") }
+        if (cancelled) { resource.close(); throw InterruptedException(messages.text("status.cancelled")) }
         active.set(resource)
         if (cancelled && active.compareAndSet(resource, null)) {
             resource.close()
-            throw InterruptedException("Операция отменена")
+            throw InterruptedException(messages.text("status.cancelled"))
         }
     }
 
-    private fun checkActive() { if (cancelled) throw InterruptedException("Операция отменена") }
+    private fun checkActive() { if (cancelled) throw InterruptedException(messages.text("status.cancelled")) }
 
     private fun phaseText(phase: WorldTransferPhase): String = when (phase) {
-        WorldTransferPhase.MANIFEST -> "Проверяем версию мира…"
-        WorldTransferPhase.OBJECTS -> "Передаём недостающие блоки…"
-        WorldTransferPhase.ACTIVATION -> "Проверяем и активируем мир…"
-        WorldTransferPhase.CONFIRMATION -> "Ждём подтверждения получателя…"
+        WorldTransferPhase.MANIFEST -> messages.text("transfer.manifest")
+        WorldTransferPhase.OBJECTS -> messages.text("transfer.objects")
+        WorldTransferPhase.ACTIVATION -> messages.text("transfer.activation")
+        WorldTransferPhase.CONFIRMATION -> messages.text("transfer.confirmation")
     }
 }

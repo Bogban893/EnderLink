@@ -1,5 +1,6 @@
 package org.enderlink.desktop.presentation
 
+import org.enderlink.desktop.i18n.messages as uiMessages
 import org.junit.jupiter.api.Timeout
 import java.io.IOException
 import java.util.concurrent.CompletableFuture
@@ -60,7 +61,7 @@ class DesktopJobsTest {
             assertFalse(secondActionRan.get())
             assertEquals(listOf(true to true, false to false), states)
             assertTrue(callbacksOnEdt.all { it })
-            assertEquals(listOf("first", "Дождитесь завершения текущей операции"), messages)
+            assertEquals(listOf("first", uiMessages.text("status.busy")), messages)
         }
     }
 

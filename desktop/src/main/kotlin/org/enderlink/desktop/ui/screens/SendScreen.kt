@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.screens
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.components.BlockButton
 import org.enderlink.desktop.ui.components.C
 import org.enderlink.desktop.ui.components.Surface
@@ -33,21 +34,21 @@ internal class SendScreen(
     val actionButtons = mutableListOf<JButton>()
     val cancelButtons = mutableListOf<BlockButton>()
 
-    val panel: JPanel = page("ОТПРАВИТЬ МИР", "Сначала создадим проверенную версию, затем передадим только нужные блоки.").apply {
+    val panel: JPanel = page(messages.text("send.title"), messages.text("send.description")).apply {
         val world = Surface().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("01  ИСТОЧНИК", 11, C.green, true)); add(gap(15))
-            add(label("Папка закрытого мира", 13, C.text, true)); add(gap(7))
-            add(horizontal(sourceField, BlockButton("Выбрать…").apply { addActionListener { onChooseDirectory(sourceField) } }))
-            add(gap(10)); add(label("Оставьте поле пустым, чтобы отправить уже опубликованную версию.", 12, C.muted))
-            add(gap(12)); add(label("В Minecraft мир должен быть закрыт до начала передачи.", 12, C.gold))
+            add(label(messages.text("send.sourceSection"), 11, C.green, true)); add(gap(15))
+            add(label(messages.text("send.sourceLabel"), 13, C.text, true)); add(gap(7))
+            add(horizontal(sourceField, BlockButton(messages.text("action.select")).apply { addActionListener { onChooseDirectory(sourceField) } }))
+            add(gap(10)); add(label(messages.text("send.existingHint"), 12, C.muted))
+            add(gap(12)); add(label(messages.text("send.closedHint"), 12, C.gold))
         }
         add(world); add(gap(20))
         add(routePanel(sendRoute, friendSend, sendHost, sendPort, true)); add(gap(20))
         add(transferProgress(sendProgress, sendProgressText))
         add(gap(20))
-        add(horizontal(BlockButton("Отправить мир  ➜", true).also { actionButtons += it }.apply {
+        add(horizontal(BlockButton(messages.text("action.sendWorld"), true).also { actionButtons += it }.apply {
             addActionListener { onSend() }
-        }, BlockButton("Отменить").also { cancelButtons += it }.apply { addActionListener { onCancel() } }))
+        }, BlockButton(messages.text("action.cancel")).also { cancelButtons += it }.apply { addActionListener { onCancel() } }))
     }
 }

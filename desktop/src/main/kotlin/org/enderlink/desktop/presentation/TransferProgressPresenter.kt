@@ -1,5 +1,6 @@
 package org.enderlink.desktop.presentation
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.screens.ReceiveScreen
 import org.enderlink.desktop.ui.screens.SendScreen
 import org.enderlink.desktop.ui.size
@@ -27,6 +28,6 @@ internal class TransferProgressPresenter(private val send: SendScreen, private v
     fun reset() {
         lastProgressNs.set(0)
         send.sendProgress.value = 0; receive.receiveProgress.value = 0
-        send.sendProgressText.text = "Подготовка…"; receive.receiveProgressText.text = "Подготовка…"
+        send.sendProgressText.text = messages.text("status.preparing"); receive.receiveProgressText.text = messages.text("status.preparing")
     }
 }

@@ -1,5 +1,6 @@
 package org.enderlink.desktop.presentation
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.agent.VanillaServer
 import org.enderlink.desktop.ui.DesktopFrame
 import org.enderlink.desktop.ui.dialogs.DesktopDialogs
@@ -51,18 +52,18 @@ internal class ServerController(
     }
 
     fun startServer() {
-        if (server?.isRunning() == true) { dialogs.warning("Сервер уже запущен"); return }
+        if (server?.isRunning() == true) { dialogs.warning(messages.text("server.alreadyRunning")); return }
         val repository = repository() ?: return
         val base = view.serverScreen.serverBaseField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
-            runCatching { Path.of(raw) }.getOrElse { dialogs.warning("Некорректный путь настроек сервера"); return }
+            runCatching { Path.of(raw) }.getOrElse { dialogs.warning(messages.text("server.directory.invalid")); return }
         }
         val jar = view.serverScreen.jarField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
-            runCatching { Path.of(raw) }.getOrElse { dialogs.warning("Некорректный путь server.jar"); return }
+            runCatching { Path.of(raw) }.getOrElse { dialogs.warning(messages.text("server.jar.invalid")); return }
         }
-        if (base == null || !Files.isDirectory(base)) { dialogs.warning("Выберите папку настроек сервера"); return }
-        if (jar == null || !Files.isRegularFile(jar)) { dialogs.warning("Выберите файл server.jar"); return }
+        if (base == null || !Files.isDirectory(base)) { dialogs.warning(messages.text("server.directory.required")); return }
+        if (jar == null || !Files.isRegularFile(jar)) { dialogs.warning(messages.text("server.jar.required")); return }
         saveSettings()
-        jobs.run("Запускаем сервер…", {
+        jobs.run(messages.text("server.starting"), {
             val session = createSession(base)
             val instance = VanillaServer(repository, session)
             instance.prepare()
@@ -80,7 +81,7 @@ internal class ServerController(
     private fun createSession(base: Path): Path {
         val eula = base.resolve("eula.txt")
         if (!Files.isRegularFile(eula) || !Files.readAllLines(eula).any { it.trim().equals("eula=true", true) }) {
-            throw IOException("Примите Minecraft EULA в eula.txt (eula=true) в выбранной папке")
+            throw IOException(messages.text("server.eula.required"))
         }
         val sessions = base.resolve("enderlink-sessions")
         Files.createDirectories(sessions)
@@ -96,10 +97,10 @@ internal class ServerController(
         if (stoppingServer) return
         stoppingServer = true
         view.serverScreen.stopButton.isEnabled = false
-        jobs.run("Сохраняем и останавливаем сервер…", { instance.stopAndPublish() }) { version ->
+        jobs.run(messages.text("server.stopping"), { instance.stopAndPublish() }) { version ->
             server = null
             stoppingServer = false
-            view.serverScreen.serverStatus.text = "Сервер остановлен · мир сохранён"
+            view.serverScreen.serverStatus.text = messages.text("server.saved")
             view.status("Новая версия опубликована · ${shortId(version)}")
             refreshStatus()
             if (closeAfterServerStop) view.dispose()
@@ -111,9 +112,9 @@ internal class ServerController(
         if (instance.isRunning() || stoppingServer || jobs.isBusy) return
         stoppingServer = true
         view.serverScreen.stopButton.isEnabled = false
-        jobs.run("Сервер завершился; проверяем мир…", { instance.publishStopped() }) { version ->
+        jobs.run(messages.text("server.exited"), { instance.publishStopped() }) { version ->
             server = null; stoppingServer = false
-            view.serverScreen.serverStatus.text = "Сервер остановлен · мир сохранён"
+            view.serverScreen.serverStatus.text = messages.text("server.saved")
             view.status("Мир сервера опубликован · ${shortId(version)}")
             refreshStatus()
         }

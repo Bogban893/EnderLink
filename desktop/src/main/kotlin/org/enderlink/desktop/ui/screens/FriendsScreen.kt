@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.screens
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.components.BlockButton
 import org.enderlink.desktop.ui.components.C
 import org.enderlink.desktop.ui.components.Surface
@@ -22,32 +23,32 @@ internal class FriendsScreen(
     val ownId = field()
     val friendName = field()
     val friendId = field()
-    val friendsList = label("Загрузка друзей…", 14, C.muted)
+    val friendsList = label(messages.text("friends.loading"), 14, C.muted)
     val actionButtons = mutableListOf<JButton>()
 
-    val panel: JPanel = page("ДРУЗЬЯ", "Обменяйтесь ID один раз, затем выбирайте имя при передаче.").apply {
+    val panel: JPanel = page(messages.text("friends.title"), messages.text("friends.description")).apply {
         add(Surface().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("ВАШ ID", 11, C.green, true)); add(gap(10)); ownId.isEditable = false
-            add(horizontal(ownId, BlockButton("Копировать").apply {
+            add(label(messages.text("friends.ownIdLabel"), 11, C.green, true)); add(gap(10)); ownId.isEditable = false
+            add(horizontal(ownId, BlockButton(messages.text("action.copy")).apply {
                 addActionListener {
                     Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(ownId.text), null)
-                    onStatus("ID скопирован")
+                    onStatus(messages.text("friends.idCopied"))
                 }
             }))
-            add(gap(9)); add(label("Отправьте ID другу. Он тоже должен добавить ваш ID у себя.", 12, C.muted))
+            add(gap(9)); add(label(messages.text("friends.exchangeHint"), 12, C.muted))
         }); add(gap(20))
         add(Surface().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("ДОБАВИТЬ ДРУГА", 11, C.green, true)); add(gap(13))
-            add(label("Имя", 13, C.text, true)); add(gap(6)); add(friendName); add(gap(12))
-            add(label("ID друга", 13, C.text, true)); add(gap(6)); add(friendId); add(gap(17))
-            add(BlockButton("Добавить друга", true).also { actionButtons += it }.apply { addActionListener { onAdd() } })
+            add(label(messages.text("friends.addSection"), 11, C.green, true)); add(gap(13))
+            add(label(messages.text("friends.nameLabel"), 13, C.text, true)); add(gap(6)); add(friendName); add(gap(12))
+            add(label(messages.text("friends.idLabel"), 13, C.text, true)); add(gap(6)); add(friendId); add(gap(17))
+            add(BlockButton(messages.text("action.addFriend"), true).also { actionButtons += it }.apply { addActionListener { onAdd() } })
         }); add(gap(20))
         add(Surface().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("СОХРАНЁННЫЕ ДРУЗЬЯ", 11, C.green, true)); add(gap(11)); add(friendsList)
-            add(gap(15)); add(BlockButton("Обновить список").apply { addActionListener { onRefresh() } })
+            add(label(messages.text("friends.savedSection"), 11, C.green, true)); add(gap(11)); add(friendsList)
+            add(gap(15)); add(BlockButton(messages.text("action.refreshFriends")).apply { addActionListener { onRefresh() } })
         })
     }
 }

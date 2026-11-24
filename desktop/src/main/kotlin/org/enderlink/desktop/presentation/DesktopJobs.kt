@@ -1,5 +1,6 @@
 package org.enderlink.desktop.presentation
 
+import org.enderlink.desktop.i18n.messages
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
@@ -20,7 +21,7 @@ internal class DesktopJobs(
     fun <T> run(title: String, action: () -> T, success: (T) -> Unit) = run(title, false, action, success)
 
     fun <T> run(title: String, cancellable: Boolean, action: () -> T, success: (T) -> Unit) {
-        if (!busy.compareAndSet(false, true)) { status("Дождитесь завершения текущей операции"); return }
+        if (!busy.compareAndSet(false, true)) { status(messages.text("status.busy")); return }
         beforeStart(cancellable)
         setBusy(true, cancellable)
         status(title)

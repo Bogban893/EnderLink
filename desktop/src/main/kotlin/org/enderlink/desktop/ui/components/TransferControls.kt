@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.components
 
+import org.enderlink.desktop.i18n.messages
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
 import javax.swing.JLabel
@@ -9,12 +10,12 @@ import javax.swing.JRadioButton
 internal fun routePanel(group: Pair<JRadioButton, JRadioButton>, friend: javax.swing.JComboBox<String>,
                        host: javax.swing.JTextField?, port: javax.swing.JTextField, sending: Boolean): JPanel = Surface().apply {
     layout = BoxLayout(this, BoxLayout.Y_AXIS)
-    add(label("02  ПОДКЛЮЧЕНИЕ", 11, C.green, true)); add(gap(12))
+    add(label(messages.text("connection.section"), 11, C.green, true)); add(gap(12))
     add(horizontal(group.first, group.second)); add(gap(16))
-    add(label(if (sending) "Кому отправить" else "От кого принять", 13, C.text, true)); add(gap(7)); add(friend)
+    add(label(if (sending) messages.text("connection.recipient") else messages.text("connection.sender"), 13, C.text, true)); add(gap(7)); add(friend)
     add(gap(13))
-    if (host != null) { add(label("Адрес в локальной сети", 13, C.text, true)); add(gap(7)); add(host); add(gap(13)) }
-    add(label("TCP-порт", 13, C.text, true)); add(gap(7)); add(port)
+    if (host != null) { add(label(messages.text("connection.address"), 13, C.text, true)); add(gap(7)); add(host); add(gap(13)) }
+    add(label(messages.text("connection.port"), 13, C.text, true)); add(gap(7)); add(port)
     fun update() {
         friend.isEnabled = group.first.isSelected
         friend.background = if (group.first.isSelected) C.input else C.panelLight
@@ -30,8 +31,8 @@ internal fun routePanel(group: Pair<JRadioButton, JRadioButton>, friend: javax.s
 }
 
 internal fun routeGroup(): Pair<JRadioButton, JRadioButton> {
-    val first = JRadioButton("Через интернет · друг", true)
-    val second = JRadioButton("Локальная сеть · TCP")
+    val first = JRadioButton(messages.text("connection.friendRoute"), true)
+    val second = JRadioButton(messages.text("connection.localRoute"))
     ButtonGroup().apply { add(first); add(second) }
     for (button in listOf(first, second)) {
         button.font = font(13, true); button.foreground = C.text; button.background = C.panel
@@ -45,6 +46,6 @@ internal fun routeGroup(): Pair<JRadioButton, JRadioButton> {
 
 internal fun transferProgress(bar: TransferBar, text: JLabel): JPanel = Surface(C.panelLight).apply {
     layout = BoxLayout(this, BoxLayout.Y_AXIS)
-    add(label("ХОД ПЕРЕДАЧИ", 11, C.green, true)); add(gap(12))
+    add(label(messages.text("transfer.progressSection"), 11, C.green, true)); add(gap(12))
     add(bar); add(gap(8)); add(text)
 }

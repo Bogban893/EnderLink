@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui
 
+import org.enderlink.desktop.i18n.messages
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
@@ -30,11 +31,11 @@ import org.enderlink.desktop.ui.screens.SendScreen
 import org.enderlink.desktop.ui.screens.ServerScreen
 import org.enderlink.desktop.presentation.DesktopController
 
-internal class DesktopFrame : JFrame("EnderLink — миры без границ") {
+internal class DesktopFrame : JFrame(messages.text("app.title")) {
     private val cards = JPanel(CardLayout()).apply { isOpaque = false }
     private val nav = mutableMapOf<String, JButton>()
     val repositoryField = field()
-    private val statusLine = label("Готово к работе", 13, C.muted)
+    private val statusLine = label(messages.text("status.ready"), 13, C.muted)
 
     val homeScreen = HomeScreen(::showPage, { controller.refreshStatus() },
         { controller.openWorldFolder() }, { controller.importOwner() })
@@ -93,13 +94,13 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         preferredSize = Dimension(222, 0)
         border = EmptyBorder(27, 16, 18, 16)
         val top = stack()
-        top.add(label("✦  ENDERLINK", 20, C.green, true))
+        top.add(label(messages.text("brand.logo"), 20, C.green, true))
         top.add(gap(5))
-        top.add(label("ТВОЙ МИР · ТВОИ ПРАВИЛА", 10, C.muted, true))
+        top.add(label(messages.text("brand.tagline"), 10, C.muted, true))
         top.add(gap(48))
         for ((id, title) in listOf(
-            "home" to "▣   Обзор", "send" to "➜   Отправить мир", "receive" to "⇩   Принять мир",
-            "server" to "▣   Сервер", "friends" to "♢   Друзья",
+            "home" to messages.text("nav.home"), "send" to messages.text("nav.send"), "receive" to messages.text("nav.receive"),
+            "server" to messages.text("nav.server"), "friends" to messages.text("nav.friends"),
         )) {
             val button = JButton(title).apply {
                 font = font(14, true); foreground = C.muted; background = C.sidebar
@@ -113,9 +114,9 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         }
         add(top, BorderLayout.NORTH)
         val bottom = stack()
-        bottom.add(label("JAVA EDITION", 11, C.gold, true))
+        bottom.add(label(messages.text("brand.edition"), 11, C.gold, true))
         bottom.add(gap(7))
-        bottom.add(label("МИР ПОД ТВОИМ КОНТРОЛЕМ", 10, C.muted))
+        bottom.add(label(messages.text("brand.control"), 10, C.muted))
         add(bottom, BorderLayout.SOUTH)
     }
 
@@ -123,9 +124,9 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         background = C.background
         border = EmptyBorder(25, 29, 17, 29)
         val head = stack()
-        head.add(label("ХРАНИЛИЩЕ МИРА", 11, C.green, true))
+        head.add(label(messages.text("repository.label"), 11, C.green, true))
         head.add(gap(7))
-        head.add(horizontal(repositoryField, BlockButton("Обзор…").apply { addActionListener { controller.chooseDirectory(repositoryField) } }))
+        head.add(horizontal(repositoryField, BlockButton(messages.text("action.browse")).apply { addActionListener { controller.chooseDirectory(repositoryField) } }))
         head.add(gap(18))
         add(head, BorderLayout.NORTH)
         cards.add(scroll(homeScreen.panel), "home")
@@ -143,7 +144,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         background = C.sidebar
         border = EmptyBorder(12, 24, 12, 24)
         add(statusLine, BorderLayout.CENTER)
-        add(label("ENDERLINK  •  DESKTOP", 10, C.muted, true), BorderLayout.EAST)
+        add(label(messages.text("brand.footer"), 10, C.muted, true), BorderLayout.EAST)
     }
 
     private fun showPage(id: String) {

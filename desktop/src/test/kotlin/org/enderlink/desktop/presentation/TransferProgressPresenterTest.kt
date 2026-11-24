@@ -1,5 +1,6 @@
 package org.enderlink.desktop.presentation
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.screens.ReceiveScreen
 import org.enderlink.desktop.ui.screens.SendScreen
 import javax.swing.SwingUtilities
@@ -24,14 +25,14 @@ class TransferProgressPresenterTest {
             assertEquals(500, send.sendProgress.value)
             assertTrue(send.sendProgressText.text.endsWith("50%"))
             assertEquals(0, receive.receiveProgress.value)
-            assertEquals("Подготовка…", receive.receiveProgressText.text)
+            assertEquals(messages.text("status.preparing"), receive.receiveProgressText.text)
             progress.receiving = true
             progress.reset()
         }
         progress.update(1024, 1024)
         SwingUtilities.invokeAndWait {
             assertEquals(0, send.sendProgress.value)
-            assertEquals("Подготовка…", send.sendProgressText.text)
+            assertEquals(messages.text("status.preparing"), send.sendProgressText.text)
             assertEquals(1000, receive.receiveProgress.value)
             assertTrue(receive.receiveProgressText.text.endsWith("100%"))
             progress.reset()

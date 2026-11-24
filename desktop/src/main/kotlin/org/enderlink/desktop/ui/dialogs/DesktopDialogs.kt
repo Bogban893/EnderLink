@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.dialogs
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.shortId
 import java.awt.Component
 import java.nio.file.Path
@@ -9,21 +10,21 @@ import javax.swing.filechooser.FileNameExtensionFilter
 
 internal class DesktopDialogs(private val parent: Component) {
     fun warning(text: String) {
-        JOptionPane.showMessageDialog(parent, text, "EnderLink", JOptionPane.WARNING_MESSAGE)
+        JOptionPane.showMessageDialog(parent, text, messages.text("app.name"), JOptionPane.WARNING_MESSAGE)
     }
 
     fun error(text: String) {
-        JOptionPane.showMessageDialog(parent, text, "EnderLink", JOptionPane.ERROR_MESSAGE)
+        JOptionPane.showMessageDialog(parent, text, messages.text("app.name"), JOptionPane.ERROR_MESSAGE)
     }
 
     fun confirmServerStop(): Boolean = JOptionPane.showConfirmDialog(parent,
-        "Сохранить мир и остановить сервер перед выходом?", "Сервер работает", JOptionPane.YES_NO_OPTION,
+        messages.text("server.confirmStop"), messages.text("server.runningTitle"), JOptionPane.YES_NO_OPTION,
     ) == JOptionPane.YES_OPTION
 
     fun confirmIncomingVersion(local: String?, incoming: String): Boolean = JOptionPane.showConfirmDialog(parent,
         "Входящая версия ${shortId(incoming)} сохранена.\n" +
-            "Активная версия ${local?.let(::shortId) ?: "отсутствует"}.\n\n" +
-            "Переключиться на входящую ветку?", "Конфликт версий", JOptionPane.YES_NO_OPTION,
+            "Активная версия ${local?.let(::shortId) ?: messages.text("conflict.noActiveVersion")}.\n\n" +
+            "Переключиться на входящую ветку?", messages.text("conflict.title"), JOptionPane.YES_NO_OPTION,
     ) == JOptionPane.YES_OPTION
 
     fun chooseDirectory(current: String): String? {
@@ -38,7 +39,7 @@ internal class DesktopDialogs(private val parent: Component) {
 
     fun chooseJar(): String? {
         val chooser = JFileChooser().apply {
-            fileFilter = FileNameExtensionFilter("Java Archive (*.jar)", "jar")
+            fileFilter = FileNameExtensionFilter(messages.text("fileChooser.jarFilter"), "jar")
         }
         return if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
     }

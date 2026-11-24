@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.components
 
+import org.enderlink.desktop.i18n.messages
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Dimension
@@ -210,9 +211,9 @@ internal class PixelScene : JComponent() {
         }
         g.color = C.text
         g.font = Font("Dialog", Font.BOLD, 26)
-        g.drawString("МИРЫ БЕЗ ГРАНИЦ", 28, 86)
+        g.drawString(messages.text("brand.sceneTitle"), 28, 86)
         g.font = Font("Dialog", Font.PLAIN, 13)
-        g.drawString("Передавай мир. Сохраняй историю. Играй вместе.", 30, 112)
+        g.drawString(messages.text("brand.sceneSubtitle"), 30, 112)
         g.color = C.border; g.stroke = BasicStroke(2f); g.drawRect(1, 1, w - 3, h - 3)
         g.dispose()
     }

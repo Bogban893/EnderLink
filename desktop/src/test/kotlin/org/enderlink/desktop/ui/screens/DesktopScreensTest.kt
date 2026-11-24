@@ -1,5 +1,6 @@
 package org.enderlink.desktop.ui.screens
 
+import org.enderlink.desktop.i18n.messages
 import java.awt.Component
 import java.awt.Container
 import javax.swing.JButton
@@ -25,24 +26,24 @@ class DesktopScreensTest {
         assertTrue(calls.isEmpty())
         assertFalse(friends.ownId.isEditable)
 
-        home.panel.click("Отправить мир")
-        home.panel.click("Принять мир")
-        home.panel.click("Обновить")
-        home.panel.click("Открыть мир")
-        home.panel.click("Перенести вещи")
-        send.panel.click("Выбрать…")
+        home.panel.click(messages.text("action.send"))
+        home.panel.click(messages.text("action.receive"))
+        home.panel.click(messages.text("action.refresh"))
+        home.panel.click(messages.text("action.openWorld"))
+        home.panel.click(messages.text("action.importOwner"))
+        send.panel.click(messages.text("action.select"))
         assertSame(send.sourceField, chosenField)
         send.actionButtons.single().doClick(0)
         send.cancelButtons.single().doClick(0)
-        receive.panel.click("Выбрать…")
+        receive.panel.click(messages.text("action.select"))
         assertSame(receive.savesField, chosenField)
-        receive.panel.click("Ждать мир  ⇩")
+        receive.panel.click(messages.text("action.waitWorld"))
         receive.cancelButtons.single().doClick(0)
-        receive.panel.click("Обновить Minecraft")
-        server.panel.click("Запустить сервер")
+        receive.panel.click(messages.text("action.install"))
+        server.panel.click(messages.text("action.startServer"))
         server.stopButton.doClick(0)
-        friends.panel.click("Добавить друга")
-        friends.panel.click("Обновить список")
+        friends.panel.click(messages.text("action.addFriend"))
+        friends.panel.click(messages.text("action.refreshFriends"))
 
         assertEquals(listOf("send", "receive", "refresh", "open", "owner", "send", "cancel-send",
             "receive", "cancel-receive", "install", "start", "stop", "add", "friends"), calls)
