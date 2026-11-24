@@ -1,6 +1,6 @@
 package org.enderlink.desktop.settings
 
-import org.enderlink.desktop.MinecraftSaves
+import org.enderlink.desktop.minecraft.MinecraftSaves
 import org.enderlink.worldtransfer.ParentFingerprint
 import java.nio.file.Files
 import java.nio.file.Path

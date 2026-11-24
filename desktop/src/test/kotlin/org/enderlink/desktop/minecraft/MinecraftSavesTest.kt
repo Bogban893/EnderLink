@@ -1,4 +1,4 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.minecraft
 
 import org.enderlink.world.WorldRepository
 import org.junit.jupiter.api.io.TempDir

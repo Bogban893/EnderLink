@@ -1,4 +1,4 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.transfer
 
 import org.enderlink.network.connection.Connection
 import org.enderlink.network.connection.Endpoint

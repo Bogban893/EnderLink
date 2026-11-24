@@ -1,4 +1,4 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.minecraft
 
 import org.enderlink.world.WorldEntry
 import org.enderlink.world.WorldManifest

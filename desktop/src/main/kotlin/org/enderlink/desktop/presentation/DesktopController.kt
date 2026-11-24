@@ -1,9 +1,9 @@
 package org.enderlink.desktop.presentation
 
-import org.enderlink.desktop.DesktopOperations
-import org.enderlink.desktop.MinecraftSaves
-import org.enderlink.desktop.Route
-import org.enderlink.desktop.TransferTarget
+import org.enderlink.desktop.transfer.DesktopOperations
+import org.enderlink.desktop.minecraft.MinecraftSaves
+import org.enderlink.desktop.transfer.Route
+import org.enderlink.desktop.transfer.TransferTarget
 import org.enderlink.desktop.settings.DesktopPreferences
 import org.enderlink.desktop.settings.DesktopSettings
 import org.enderlink.desktop.ui.DesktopFrame
