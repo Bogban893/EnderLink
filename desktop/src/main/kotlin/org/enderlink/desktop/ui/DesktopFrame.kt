@@ -9,11 +9,6 @@ import org.enderlink.worldtransfer.ParentFingerprint
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.GraphicsEnvironment
-import java.awt.GridLayout
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
 import java.awt.event.WindowAdapter
@@ -28,9 +23,6 @@ import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import javax.swing.Box
-import javax.swing.BoxLayout
-import javax.swing.ButtonGroup
 import javax.swing.JButton
 import javax.swing.JFileChooser
 import javax.swing.JFrame
@@ -38,16 +30,29 @@ import javax.swing.JLabel
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JRadioButton
-import javax.swing.JScrollPane
 import javax.swing.SwingUtilities
 import javax.swing.Timer
-import javax.swing.UIManager
 import javax.swing.border.EmptyBorder
 import org.enderlink.desktop.DesktopOperations
 import org.enderlink.desktop.MinecraftSaves
 import org.enderlink.desktop.Route
 import org.enderlink.desktop.TransferTarget
-import org.enderlink.desktop.ui.components.*
+import org.enderlink.desktop.ui.components.BlockButton
+import org.enderlink.desktop.ui.components.C
+import org.enderlink.desktop.ui.components.UiScale
+import org.enderlink.desktop.ui.components.field
+import org.enderlink.desktop.ui.components.font
+import org.enderlink.desktop.ui.components.gap
+import org.enderlink.desktop.ui.components.horizontal
+import org.enderlink.desktop.ui.components.label
+import org.enderlink.desktop.ui.components.page
+import org.enderlink.desktop.ui.components.scroll
+import org.enderlink.desktop.ui.components.stack
+import org.enderlink.desktop.ui.screens.FriendsScreen
+import org.enderlink.desktop.ui.screens.HomeScreen
+import org.enderlink.desktop.ui.screens.ReceiveScreen
+import org.enderlink.desktop.ui.screens.SendScreen
+import org.enderlink.desktop.ui.screens.ServerScreen
 
 internal class DesktopFrame : JFrame("EnderLink — миры без границ") {
     private val settingsPath = Path.of(System.getProperty("user.home"), ".enderlink", "desktop.properties")
@@ -56,7 +61,6 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private val busy = AtomicBoolean(false)
     private val cards = JPanel(CardLayout()).apply { isOpaque = false }
     private val nav = mutableMapOf<String, JButton>()
-    private val actionButtons = mutableListOf<JButton>()
     private var currentPage = "home"
     private var server: VanillaServer? = null
     private var sessionDirectory: Path? = null
@@ -68,42 +72,24 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private val lastProgressNs = AtomicLong(0)
 
     private val repositoryField = field()
-    private val sourceField = field()
-    private val friendSend = combo(arrayOf(""))
-    private val friendReceive = combo(arrayOf(""))
-    private val sendHost = field("127.0.0.1")
-    private val sendPort = field("25570")
-    private val receivePort = field("25570")
-    private val savesField = field()
-    private val saveNameField = field()
-    private val ownerField = field()
-    private val serverBaseField = field()
-    private val jarField = field()
-    private val ownId = field()
-    private val friendName = field()
-    private val friendId = field()
-    private val friendsList = label("Загрузка друзей…", 14, C.muted)
-    private val sendRoute = routeGroup()
-    private val receiveRoute = routeGroup()
     private val statusLine = label("Готово к работе", 13, C.muted)
-    private val statusWorld = label("Мир ещё не выбран", 19, C.text, true)
-    private val statusDetail = label("Выберите хранилище версий выше", 13, C.muted)
-    private val playerHint = label("", 13, C.gold)
-    private val serverStatus = label("Сервер не запущен", 15, C.muted)
-    private val sendProgress = TransferBar()
-    private val receiveProgress = TransferBar()
-    private val sendProgressText = label("", 12, C.muted)
-    private val receiveProgressText = label("", 12, C.muted)
-    private val cancelButtons = mutableListOf<BlockButton>()
-    private val stopButton = BlockButton("Сохранить и остановить", true)
+
+    val homeScreen = HomeScreen(::showPage, ::refreshStatus, ::openWorldFolder, ::importOwner)
+    val sendScreen = SendScreen(::chooseDirectory, ::startSend, ::cancelOperation)
+    val receiveScreen = ReceiveScreen(::chooseDirectory, ::startReceive, ::cancelOperation, ::installMinecraft)
+    val serverScreen = ServerScreen(::chooseDirectory, ::chooseFile, ::startServer, ::stopServer)
+    val friendsScreen = FriendsScreen(::addFriend, ::refreshFriends, ::status)
+    private val actionButtons = homeScreen.actionButtons + sendScreen.actionButtons +
+        receiveScreen.actionButtons + serverScreen.actionButtons + friendsScreen.actionButtons
+    private val cancelButtons = sendScreen.cancelButtons + receiveScreen.cancelButtons
 
     init {
         runCatching { Files.newInputStream(settingsPath).use(settings::load) }
         repositoryField.text = settings.getProperty("repository", "")
-        savesField.text = settings.getProperty("saves", MinecraftSaves.defaultDirectory().toString())
-        saveNameField.text = settings.getProperty("saveName", "EnderLink World")
-        serverBaseField.text = settings.getProperty("serverBase", "")
-        jarField.text = settings.getProperty("jar", "")
+        receiveScreen.savesField.text = settings.getProperty("saves", MinecraftSaves.defaultDirectory().toString())
+        receiveScreen.saveNameField.text = settings.getProperty("saveName", "EnderLink World")
+        serverScreen.serverBaseField.text = settings.getProperty("serverBase", "")
+        serverScreen.jarField.text = settings.getProperty("jar", "")
         lastParentFingerprint = runCatching {
             ParentFingerprint(
                 settings.getProperty("parentVersion"),
@@ -138,7 +124,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         UiScale.attach(this)
         showPage("home")
         cancelButtons.forEach { it.isEnabled = false }
-        stopButton.isEnabled = false
+        serverScreen.stopButton.isEnabled = false
         Timer(1000) { watchServer() }.start()
         refreshStatus()
         refreshFriends()
@@ -184,11 +170,11 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         head.add(horizontal(repositoryField, BlockButton("Обзор…").apply { addActionListener { chooseDirectory(repositoryField) } }))
         head.add(gap(18))
         add(head, BorderLayout.NORTH)
-        cards.add(scroll(homePage()), "home")
-        cards.add(scroll(sendPage()), "send")
-        cards.add(scroll(receivePage()), "receive")
-        cards.add(scroll(serverPage()), "server")
-        cards.add(scroll(friendsPage()), "friends")
+        cards.add(scroll(homeScreen.panel), "home")
+        cards.add(scroll(sendScreen.panel), "send")
+        cards.add(scroll(receiveScreen.panel), "receive")
+        cards.add(scroll(serverScreen.panel), "server")
+        cards.add(scroll(friendsScreen.panel), "friends")
         add(cards, BorderLayout.CENTER)
         repositoryField.addFocusListener(object : FocusAdapter() {
             override fun focusLost(e: FocusEvent) { saveSettings(); refreshStatus() }
@@ -202,190 +188,15 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         add(label("ENDERLINK  •  DESKTOP", 10, C.muted, true), BorderLayout.EAST)
     }
 
-    private fun homePage(): JPanel = page("ОБЗОР", "Всё нужное для передачи мира — в одном месте.").apply {
-        add(PixelScene().apply { alignmentX = 0f })
-        add(gap(16))
-        add(horizontal(BlockButton("Отправить мир", true).apply { addActionListener { showPage("send") } },
-            BlockButton("Принять мир").apply { addActionListener { showPage("receive") } }))
-        add(gap(23))
-        val summary = Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("АКТИВНАЯ ВЕРСИЯ", 11, C.green, true)); add(gap(10))
-            add(statusWorld); add(gap(5)); add(statusDetail); add(gap(11)); add(playerHint)
-            add(gap(17))
-            add(horizontal(BlockButton("Обновить").apply { addActionListener { refreshStatus() } },
-                BlockButton("Открыть мир").apply { addActionListener { openWorldFolder() } }))
-        }
-        add(summary); add(gap(24))
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("ИНВЕНТАРЬ ВЛАДЕЛЬЦА СТАРОГО МИРА", 11, C.gold, true)); add(gap(9))
-            add(label("Если старый одиночный мир хранит вещи в level.dat, укажите UUID Minecraft аккаунта.", 12, C.muted))
-            add(gap(12)); add(horizontal(ownerField, BlockButton("Перенести вещи").also { actionButtons += it }.apply {
-                addActionListener { importOwner() }
-            }))
-        }); add(gap(24))
-        add(label("КАК ЭТО РАБОТАЕТ", 12, C.gold, true)); add(gap(12))
-        add(horizontal(
-            stepCard("01", "Выбери мир", "Закрой Minecraft и укажи папку сохранения."),
-            stepCard("02", "Передай другу", "По ID друга или по адресу в локальной сети."),
-            stepCard("03", "Продолжай играть", "Получатель запустит мир из своей копии."),
-        ))
-    }
-
-    private fun stepCard(number: String, title: String, description: String): JPanel = Surface(C.panelLight).apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        add(label(number, 13, C.gold, true)); add(gap(8)); add(label(title, 16, C.text, true)); add(gap(7))
-        add(label("<html><body style='width:230px'>$description</body></html>", 12, C.muted))
-    }
-
-    private fun sendPage(): JPanel = page("ОТПРАВИТЬ МИР", "Сначала создадим проверенную версию, затем передадим только нужные блоки.").apply {
-        val world = Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("01  ИСТОЧНИК", 11, C.green, true)); add(gap(15))
-            add(label("Папка закрытого мира", 13, C.text, true)); add(gap(7))
-            add(horizontal(sourceField, BlockButton("Выбрать…").apply { addActionListener { chooseDirectory(sourceField) } }))
-            add(gap(10)); add(label("Оставьте поле пустым, чтобы отправить уже опубликованную версию.", 12, C.muted))
-            add(gap(12)); add(label("В Minecraft мир должен быть закрыт до начала передачи.", 12, C.gold))
-        }
-        add(world); add(gap(20))
-        add(routePanel(sendRoute, friendSend, sendHost, sendPort, true)); add(gap(20))
-        add(transferProgress(sendProgress, sendProgressText))
-        add(gap(20))
-        add(horizontal(BlockButton("Отправить мир  ➜", true).also { actionButtons += it }.apply {
-            addActionListener { startSend() }
-        }, BlockButton("Отменить").also { cancelButtons += it }.apply { addActionListener { cancelOperation() } }))
-    }
-
-    private fun receivePage(): JPanel = page("ПРИНЯТЬ МИР", "Открой ожидание, а друг выберет тебя на экране отправки.").apply {
-        val info = Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("БЕЗОПАСНОЕ ПОЛУЧЕНИЕ", 11, C.green, true)); add(gap(11))
-            add(label("Версия активируется после проверки всех блоков.", 15, C.text, true)); add(gap(8))
-            add(label("При конфликте входящая версия сохранится, а выбор ветки останется за вами.", 12, C.muted))
-        }
-        add(info); add(gap(20))
-        add(routePanel(receiveRoute, friendReceive, null, receivePort, false)); add(gap(20))
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("03  СОХРАНЕНИЕ В MINECRAFT", 11, C.green, true)); add(gap(12))
-            add(label("Папка saves вашей установки Minecraft Java", 13, C.text, true)); add(gap(7))
-            add(horizontal(savesField, BlockButton("Выбрать…").apply { addActionListener { chooseDirectory(savesField) } }))
-            add(gap(12)); add(label("Имя папки мира", 13, C.text, true)); add(gap(7)); add(saveNameField)
-            add(gap(10)); add(label("Мир появится в списке одиночной игры после получения. Закройте его перед обновлением.", 12, C.muted))
-            add(gap(6)); add(label("Открывайте полученный мир совместимой версией Minecraft Java.", 12, C.gold))
-        }); add(gap(20))
-        add(transferProgress(receiveProgress, receiveProgressText))
-        add(gap(20))
-        add(horizontal(BlockButton("Ждать мир  ⇩", true).also { actionButtons += it }.apply {
-            addActionListener { startReceive() }
-        }, BlockButton("Отменить").also { cancelButtons += it }.apply {
-            addActionListener { cancelOperation() }
-        }, BlockButton("Обновить Minecraft").also { actionButtons += it }.apply {
-            addActionListener { installMinecraft() }
-        }))
-    }
-
-    private fun serverPage(): JPanel = page("СЕРВЕР", "Запусти опубликованный мир на своём компьютере.").apply {
-        val info = Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("СОСТОЯНИЕ", 11, C.green, true)); add(gap(11)); add(serverStatus)
-            add(gap(9)); add(label("После остановки мир автоматически публикуется как новая версия.", 12, C.muted))
-        }
-        add(info); add(gap(20))
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("НАСТРОЙКИ VANILLA СЕРВЕРА", 11, C.green, true)); add(gap(14))
-            add(label("Папка с eula.txt и server.properties", 13, C.text, true)); add(gap(7))
-            add(horizontal(serverBaseField, BlockButton("Выбрать…").apply { addActionListener { chooseDirectory(serverBaseField) } }))
-            add(gap(14)); add(label("Файл server.jar", 13, C.text, true)); add(gap(7))
-            add(horizontal(jarField, BlockButton("Выбрать…").apply { addActionListener { chooseFile(jarField) } }))
-            add(gap(12)); add(label("Для каждого запуска создаётся отдельная папка с копией мира и журналом.", 12, C.muted))
-            add(gap(7)); add(label("В server.properties используйте online-mode=true и level-name=world.", 12, C.gold))
-        }); add(gap(20))
-        add(horizontal(BlockButton("Запустить сервер", true).also { actionButtons += it }.apply {
-            addActionListener { startServer() }
-        }, stopButton.apply { addActionListener { stopServer() } }))
-    }
-
-    private fun friendsPage(): JPanel = page("ДРУЗЬЯ", "Обменяйтесь ID один раз, затем выбирайте имя при передаче.").apply {
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("ВАШ ID", 11, C.green, true)); add(gap(10)); ownId.isEditable = false
-            add(horizontal(ownId, BlockButton("Копировать").apply {
-                addActionListener {
-                    Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(ownId.text), null)
-                    status("ID скопирован")
-                }
-            }))
-            add(gap(9)); add(label("Отправьте ID другу. Он тоже должен добавить ваш ID у себя.", 12, C.muted))
-        }); add(gap(20))
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("ДОБАВИТЬ ДРУГА", 11, C.green, true)); add(gap(13))
-            add(label("Имя", 13, C.text, true)); add(gap(6)); add(friendName); add(gap(12))
-            add(label("ID друга", 13, C.text, true)); add(gap(6)); add(friendId); add(gap(17))
-            add(BlockButton("Добавить друга", true).also { actionButtons += it }.apply { addActionListener { addFriend() } })
-        }); add(gap(20))
-        add(Surface().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(label("СОХРАНЁННЫЕ ДРУЗЬЯ", 11, C.green, true)); add(gap(11)); add(friendsList)
-            add(gap(15)); add(BlockButton("Обновить список").apply { addActionListener { refreshFriends() } })
-        })
-    }
-
-    private fun routePanel(group: Pair<JRadioButton, JRadioButton>, friend: javax.swing.JComboBox<String>,
-                           host: javax.swing.JTextField?, port: javax.swing.JTextField, sending: Boolean): JPanel = Surface().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        add(label("02  ПОДКЛЮЧЕНИЕ", 11, C.green, true)); add(gap(12))
-        add(horizontal(group.first, group.second)); add(gap(16))
-        add(label(if (sending) "Кому отправить" else "От кого принять", 13, C.text, true)); add(gap(7)); add(friend)
-        add(gap(13))
-        if (host != null) { add(label("Адрес в локальной сети", 13, C.text, true)); add(gap(7)); add(host); add(gap(13)) }
-        add(label("TCP-порт", 13, C.text, true)); add(gap(7)); add(port)
-        fun update() {
-            friend.isEnabled = group.first.isSelected
-            friend.background = if (group.first.isSelected) C.input else C.panelLight
-            for (input in listOfNotNull(host, port)) {
-                input.isEnabled = group.second.isSelected
-                input.background = if (group.second.isSelected) C.input else C.panelLight
-                input.foreground = if (group.second.isSelected) C.text else C.muted
-            }
-        }
-        group.first.addActionListener { update() }
-        group.second.addActionListener { update() }
-        update()
-    }
-
-    private fun routeGroup(): Pair<JRadioButton, JRadioButton> {
-        val first = JRadioButton("Через интернет · друг", true)
-        val second = JRadioButton("Локальная сеть · TCP")
-        ButtonGroup().apply { add(first); add(second) }
-        for (button in listOf(first, second)) {
-            button.font = font(13, true); button.foreground = C.text; button.background = C.panel
-            button.isFocusPainted = false
-            button.icon = PixelRadioIcon(false)
-            button.selectedIcon = PixelRadioIcon(true)
-            button.iconTextGap = 9
-        }
-        return first to second
-    }
-
-    private fun transferProgress(bar: TransferBar, text: JLabel): JPanel = Surface(C.panelLight).apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        add(label("ХОД ПЕРЕДАЧИ", 11, C.green, true)); add(gap(12))
-        add(bar); add(gap(8)); add(text)
-    }
-
     private fun startSend() {
         if (server?.isRunning() == true) { error("Сначала остановите сервер и опубликуйте его мир"); return }
-        val source = sourceField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
+        val source = sendScreen.sourceField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
             runCatching { Path.of(raw) }.getOrElse { error("Некорректный путь мира"); return }
         }
         if (source != null && (!Files.isDirectory(source) || !Files.isRegularFile(source.resolve("level.dat")))) {
             error("Выберите папку закрытого мира с файлом level.dat"); return
         }
-        val target = target(sendRoute, friendSend, sendHost, sendPort) ?: return
+        val target = target(sendScreen.sendRoute, sendScreen.friendSend, sendScreen.sendHost, sendScreen.sendPort) ?: return
         val repository = repository() ?: return
         if (source != null) {
             val origin = source.toAbsolutePath().normalize()
@@ -403,14 +214,14 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
             operations.send(repository, source, target, ::statusAsync, ::progressAsync)
         }) { result ->
             status("Мир передан и подтверждён · ${shortId(result.versionId)}")
-            sendProgressText.text = "Готово · передано ${size(result.transferredBytes)}, повторно использовано ${size(result.reusedBytes)}"
+            sendScreen.sendProgressText.text = "Готово · передано ${size(result.transferredBytes)}, повторно использовано ${size(result.reusedBytes)}"
             refreshStatus()
         }
     }
 
     private fun startReceive() {
         if (server?.isRunning() == true) { error("Сначала остановите сервер"); return }
-        val target = target(receiveRoute, friendReceive, null, receivePort) ?: return
+        val target = target(receiveScreen.receiveRoute, receiveScreen.friendReceive, null, receiveScreen.receivePort) ?: return
         val repository = repository() ?: return
         val saves = minecraftDestination() ?: return
         saveSettings()
@@ -437,16 +248,16 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
             result to installed
         }) { (result, installed) ->
             status("Мир принят · ${shortId(result.versionId)}")
-            receiveProgressText.text = "Готово · получено ${size(result.transferredBytes)}, в Minecraft: ${installed.directory.fileName}"
+            receiveScreen.receiveProgressText.text = "Готово · получено ${size(result.transferredBytes)}, в Minecraft: ${installed.directory.fileName}"
             refreshStatus()
         }
     }
 
     private fun minecraftDestination(): Pair<Path, String>? {
-        val path = savesField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
+        val path = receiveScreen.savesField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
             runCatching { Path.of(raw) }.getOrElse { error("Некорректный путь папки saves"); return null }
         } ?: run { error("Выберите папку saves вашей установки Minecraft"); return null }
-        val name = saveNameField.text.trim()
+        val name = receiveScreen.saveNameField.text.trim()
         if (name.isBlank()) { error("Введите имя папки мира"); return null }
         return path to name
     }
@@ -460,7 +271,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
             MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint)
         }) { installed ->
             status("Мир Minecraft обновлён · ${installed.directory}")
-            receiveProgressText.text = "В Minecraft: ${installed.directory} · изменено ${installed.replacedFiles} файлов"
+            receiveScreen.receiveProgressText.text = "В Minecraft: ${installed.directory} · изменено ${installed.replacedFiles} файлов"
         }
     }
 
@@ -481,10 +292,10 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private fun startServer() {
         if (server?.isRunning() == true) { error("Сервер уже запущен"); return }
         val repository = repository() ?: return
-        val base = serverBaseField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
+        val base = serverScreen.serverBaseField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
             runCatching { Path.of(raw) }.getOrElse { error("Некорректный путь настроек сервера"); return }
         }
-        val jar = jarField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
+        val jar = serverScreen.jarField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
             runCatching { Path.of(raw) }.getOrElse { error("Некорректный путь server.jar"); return }
         }
         if (base == null || !Files.isDirectory(base)) { error("Выберите папку настроек сервера"); return }
@@ -499,8 +310,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         }) { (session, instance) ->
             sessionDirectory = session
             server = instance
-            serverStatus.text = "Сервер работает · ${instance.versionId.take(18)}…"
-            stopButton.isEnabled = true
+            serverScreen.serverStatus.text = "Сервер работает · ${instance.versionId.take(18)}…"
+            serverScreen.stopButton.isEnabled = true
             status("Сервер запущен · журнал: $session/enderlink-server.log")
         }
     }
@@ -523,11 +334,11 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         val instance = server ?: return
         if (stoppingServer) return
         stoppingServer = true
-        stopButton.isEnabled = false
+        serverScreen.stopButton.isEnabled = false
         job("Сохраняем и останавливаем сервер…", { instance.stopAndPublish() }) { version ->
             server = null
             stoppingServer = false
-            serverStatus.text = "Сервер остановлен · мир сохранён"
+            serverScreen.serverStatus.text = "Сервер остановлен · мир сохранён"
             status("Новая версия опубликована · ${shortId(version)}")
             refreshStatus()
             if (closeAfterServerStop) dispose()
@@ -538,19 +349,19 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         val instance = server ?: return
         if (instance.isRunning() || stoppingServer || busy.get()) return
         stoppingServer = true
-        stopButton.isEnabled = false
+        serverScreen.stopButton.isEnabled = false
         job("Сервер завершился; проверяем мир…", { instance.publishStopped() }) { version ->
             server = null; stoppingServer = false
-            serverStatus.text = "Сервер остановлен · мир сохранён"
+            serverScreen.serverStatus.text = "Сервер остановлен · мир сохранён"
             status("Мир сервера опубликован · ${shortId(version)}")
             refreshStatus()
         }
     }
 
     private fun addFriend() {
-        val name = friendName.text.trim(); val id = friendId.text.trim()
+        val name = friendsScreen.friendName.text.trim(); val id = friendsScreen.friendId.text.trim()
         job("Сохраняем друга…", { IrohProfile.open().use { it.add(name, id) } }) {
-            friendName.text = ""; friendId.text = ""
+            friendsScreen.friendName.text = ""; friendsScreen.friendId.text = ""
             status("Друг $name добавлен")
             refreshFriends()
         }
@@ -558,8 +369,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
 
     private fun importOwner() {
         if (server?.isRunning() == true) { error("Сначала остановите сервер"); return }
-        val owner = runCatching { UUID.fromString(ownerField.text.trim()) }.getOrNull()
-        if (owner == null || owner.toString() != ownerField.text.trim().lowercase()) {
+        val owner = runCatching { UUID.fromString(homeScreen.ownerField.text.trim()) }.getOrNull()
+        if (owner == null || owner.toString() != homeScreen.ownerField.text.trim().lowercase()) {
             error("Введите полный UUID вашего Minecraft аккаунта")
             return
         }
@@ -572,14 +383,14 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
 
     private fun refreshFriends() {
         job("Загружаем профиль…", { IrohProfile.open().use { it.id to it.friends() } }) { (id, friends) ->
-            ownId.text = id
-            val previousSend = friendSend.selectedItem as? String
-            val previousReceive = friendReceive.selectedItem as? String
-            friendSend.removeAllItems(); friendReceive.removeAllItems()
-            friends.keys.forEach { friendSend.addItem(it); friendReceive.addItem(it) }
-            if (previousSend in friends) friendSend.selectedItem = previousSend
-            if (previousReceive in friends) friendReceive.selectedItem = previousReceive
-            friendsList.text = if (friends.isEmpty()) "Пока никого нет — добавьте друга по ID." else
+            friendsScreen.ownId.text = id
+            val previousSend = sendScreen.friendSend.selectedItem as? String
+            val previousReceive = receiveScreen.friendReceive.selectedItem as? String
+            sendScreen.friendSend.removeAllItems(); receiveScreen.friendReceive.removeAllItems()
+            friends.keys.forEach { sendScreen.friendSend.addItem(it); receiveScreen.friendReceive.addItem(it) }
+            if (previousSend in friends) sendScreen.friendSend.selectedItem = previousSend
+            if (previousReceive in friends) receiveScreen.friendReceive.selectedItem = previousReceive
+            friendsScreen.friendsList.text = if (friends.isEmpty()) "Пока никого нет — добавьте друга по ID." else
                 "<html>" + friends.keys.joinToString("<br>") { "<span style='color:#84be60'>◆</span>  $it" } + "</html>"
             status("Профиль готов · друзей: ${friends.size}")
         }
@@ -588,7 +399,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private fun refreshStatus() {
         val path = repositoryField.text.trim()
         if (path.isBlank()) {
-            statusWorld.text = "Мир ещё не выбран"; statusDetail.text = "Выберите хранилище версий выше"; playerHint.text = ""
+            homeScreen.statusWorld.text = "Мир ещё не выбран"; homeScreen.statusDetail.text = "Выберите хранилище версий выше"; homeScreen.playerHint.text = ""
             return
         }
         job("Читаем версию мира…", {
@@ -597,17 +408,17 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
             val player = if (current == null) null else PlayerDataInspector.inspect(repo.workingDirectory)
             Triple(repo, current, player)
         }) { (repo, current, player) ->
-            statusWorld.text = if (current == null) "Версий пока нет" else "Версия ${shortId(current.versionId)}"
-            statusDetail.text = if (current == null) "Выберите закрытый мир на вкладке «Отправить»" else
+            homeScreen.statusWorld.text = if (current == null) "Версий пока нет" else "Версия ${shortId(current.versionId)}"
+            homeScreen.statusDetail.text = if (current == null) "Выберите закрытый мир на вкладке «Отправить»" else
                 "Рабочая копия: ${repo.workingDirectory}"
-            playerHint.text = when {
+            homeScreen.playerHint.text = when {
                 player == null -> ""
                 player.legacyEmbeddedPlayer -> "⚠ Данные владельца старого мира в level.dat — см. импорт ниже"
                 player.singleplayerUuid && player.modernPlayerFiles == 0 -> "⚠ Проверьте файл игрока для singleplayer_uuid"
                 else -> "Файлов игроков: ${player.legacyPlayerFiles + player.modernPlayerFiles}"
             }
             status("Состояние мира обновлено")
-            if (ownId.text.isBlank()) refreshFriends()
+            if (friendsScreen.ownId.text.isBlank()) refreshFriends()
         }
     }
 
@@ -647,9 +458,9 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
                         closeAfterServerStop = false
                         if (server?.isRunning() == false) {
                             server = null
-                            serverStatus.text = "Сервер остановлен · проверьте журнал в $sessionDirectory"
+                            serverScreen.serverStatus.text = "Сервер остановлен · проверьте журнал в $sessionDirectory"
                         }
-                        stopButton.isEnabled = server?.isRunning() == true
+                        serverScreen.stopButton.isEnabled = server?.isRunning() == true
                     }
                 }
             }
@@ -690,8 +501,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         lastProgressNs.set(now)
         SwingUtilities.invokeLater {
             val value = if (total == 0L) 0 else ((done.toDouble() / total) * 1000).toInt().coerceIn(0, 1000)
-            val bar = if (receivingTransfer) receiveProgress else sendProgress
-            val text = if (receivingTransfer) receiveProgressText else sendProgressText
+            val bar = if (receivingTransfer) receiveScreen.receiveProgress else sendScreen.sendProgress
+            val text = if (receivingTransfer) receiveScreen.receiveProgressText else sendScreen.sendProgressText
             bar.value = value
             text.text = "${size(done)} из ${size(total)} · ${value / 10}%"
         }
@@ -702,8 +513,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private fun error(text: String) { JOptionPane.showMessageDialog(this, text, "EnderLink", JOptionPane.WARNING_MESSAGE) }
     private fun resetProgress() {
         lastProgressNs.set(0)
-        sendProgress.value = 0; receiveProgress.value = 0
-        sendProgressText.text = "Подготовка…"; receiveProgressText.text = "Подготовка…"
+        sendScreen.sendProgress.value = 0; receiveScreen.receiveProgress.value = 0
+        sendScreen.sendProgressText.text = "Подготовка…"; receiveScreen.receiveProgressText.text = "Подготовка…"
     }
 
     private fun showPage(id: String) {
@@ -717,8 +528,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
 
     private fun saveSettings() {
         settings.setProperty("repository", repositoryField.text.trim())
-        settings.setProperty("saves", savesField.text.trim())
-        settings.setProperty("saveName", saveNameField.text.trim())
+        settings.setProperty("saves", receiveScreen.savesField.text.trim())
+        settings.setProperty("saveName", receiveScreen.saveNameField.text.trim())
         lastParentFingerprint?.let {
             settings.setProperty("parentVersion", it.versionId)
             settings.setProperty("parentFormat", it.formatVersion.toString())
@@ -726,8 +537,8 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         } ?: run {
             settings.remove("parentVersion"); settings.remove("parentFormat"); settings.remove("parentHash")
         }
-        settings.setProperty("serverBase", serverBaseField.text.trim())
-        settings.setProperty("jar", jarField.text.trim())
+        settings.setProperty("serverBase", serverScreen.serverBaseField.text.trim())
+        settings.setProperty("jar", serverScreen.jarField.text.trim())
         runCatching {
             Files.createDirectories(settingsPath.parent)
             Files.newOutputStream(settingsPath).use { settings.store(it, "EnderLink Desktop paths") }

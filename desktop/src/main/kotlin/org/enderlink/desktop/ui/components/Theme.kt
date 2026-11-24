@@ -19,7 +19,6 @@ import javax.swing.JPanel
 import javax.swing.JProgressBar
 import javax.swing.Icon
 import javax.swing.JTextField
-import javax.swing.JScrollBar
 import javax.swing.border.EmptyBorder
 import javax.swing.plaf.basic.BasicScrollBarUI
 import javax.swing.plaf.basic.BasicComboBoxUI
