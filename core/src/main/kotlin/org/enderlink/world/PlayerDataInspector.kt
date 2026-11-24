@@ -103,35 +103,121 @@ object PlayerDataInspector {
         writeGzip(target, player)
     }
 
+    /** UUID used by an offline LAN server. The caller explicitly links this nickname to their account. */
+    fun offlineUuid(name: String): UUID {
+        require(name.matches(Regex("[A-Za-z0-9_]{1,16}"))) { "Введите точный Minecraft-ник (1–16 букв, цифр или _)" }
+        return UUID.nameUUIDFromBytes("OfflinePlayer:$name".toByteArray(Charsets.UTF_8))
+    }
+
+    /** Synchronizes the explicitly linked host and LAN profiles in a private publication copy. */
+    fun captureSingleplayerOwner(world: Path, owner: UUID, guest: UUID? = null) {
+        captureLegacyOwner(world, owner)
+        if (guest == null) return
+        val raw = readLevel(world)
+        val uuidTag = findDataTag(raw, "singleplayer_uuid")
+        val modern = uuidTag != null
+        if (uuidTag != null && readUuid(raw, uuidTag) != owner) {
+            throw IOException("UUID владельца не совпадает с singleplayer_uuid (${readUuid(raw, uuidTag)}). " +
+                "Укажите UUID аккаунта, которым открывали этот мир одиночно")
+        }
+        synchronizeProfile(world, modern, owner, guest)
+    }
+
+    /** Copies the LAN guest's latest state into their host profile in a private installation copy. */
+    private fun restoreLanOwner(world: Path, owner: UUID, guest: UUID) {
+        val modern = inspect(world).singleplayerUuid
+        val source = profilePath(world, modern, "data", guest, ".dat")
+        if (Files.exists(source, NOFOLLOW_LINKS)) synchronizeProfile(world, modern, guest, owner)
+    }
+
+    private fun synchronizeProfile(world: Path, modern: Boolean, source: UUID, target: UUID) {
+        val sourceFile = profilePath(world, modern, "data", source, ".dat")
+        if (!Files.isRegularFile(sourceFile, NOFOLLOW_LINKS)) throw IOException("Не найден профиль владельца: $sourceFile")
+        val raw = readGzip(sourceFile)
+        playerPayloadStart(raw)
+        if (source == target) return
+        val targetFile = profilePath(world, modern, "data", target, ".dat")
+        Files.createDirectories(targetFile.parent)
+        writeGzip(targetFile, withPlayerUuid(raw, target))
+        for (kind in listOf("advancements", "stats")) {
+            val from = profilePath(world, modern, kind, source, ".json")
+            val to = profilePath(world, modern, kind, target, ".json")
+            if (Files.exists(from, NOFOLLOW_LINKS)) {
+                Files.createDirectories(to.parent)
+                Files.copy(from, to, REPLACE_EXISTING)
+            } else Files.deleteIfExists(to)
+        }
+    }
+
+    private fun profilePath(world: Path, modern: Boolean, kind: String, owner: UUID, extension: String): Path {
+        val directory = if (modern) "players/$kind" else if (kind == "data") "playerdata" else kind
+        var parent = world
+        for (part in directory.split('/')) {
+            parent = parent.resolve(part)
+            if (Files.exists(parent, NOFOLLOW_LINKS) && !Files.isDirectory(parent, NOFOLLOW_LINKS)) {
+                throw IOException("Ожидается обычный каталог: $parent")
+            }
+        }
+        val path = parent.resolve("$owner$extension")
+        if (Files.exists(path, NOFOLLOW_LINKS) && !Files.isRegularFile(path, NOFOLLOW_LINKS)) {
+            throw IOException("Ожидается обычный файл: $path")
+        }
+        return path
+    }
+
+    private fun withPlayerUuid(raw: ByteArray, owner: UUID): ByteArray {
+        val input = DataInputStream(ByteArrayInputStream(raw))
+        input.readUnsignedByte()
+        readName(input)
+        var uuid: TagRange? = null
+        while (true) {
+            val start = raw.size - input.available()
+            val type = input.readUnsignedByte()
+            if (type == 0) break
+            val name = readName(input)
+            val payloadStart = raw.size - input.available()
+            skipPayload(input, type, 1)
+            if (name == "UUID") {
+                if (uuid != null) throw IOException("В профиле несколько UUID")
+                uuid = TagRange(start, raw.size - input.available(), type, payloadStart)
+                readUuid(raw, uuid)
+            }
+        }
+        return raw.splice(uuid ?: TagRange(raw.lastIndex, raw.lastIndex, 0, raw.lastIndex), uuidTag("UUID", owner))
+    }
+
+    private fun readUuid(raw: ByteArray, tag: TagRange): UUID {
+        if (tag.type != 11) throw IOException("UUID должен быть массивом из четырёх int")
+        val buffer = java.nio.ByteBuffer.wrap(raw, tag.payloadStart, tag.end - tag.payloadStart)
+        if (buffer.int != 4) throw IOException("Некорректная длина UUID")
+        return UUID(buffer.long, buffer.long)
+    }
+
+    private fun uuidTag(name: String, owner: UUID): ByteArray = ByteArrayOutputStream().also { bytes ->
+        DataOutputStream(bytes).use { output ->
+            output.writeByte(11); output.writeUTF(name); output.writeInt(4)
+            output.writeLong(owner.mostSignificantBits); output.writeLong(owner.leastSignificantBits)
+        }
+    }.toByteArray()
+
     /** Prepares a private save for the chosen account; published world bytes stay unchanged. */
-    fun prepareSingleplayerOwner(world: Path, owner: UUID) {
+    fun prepareSingleplayerOwner(world: Path, owner: UUID, guest: UUID? = null) {
         val state = inspect(world)
         if (!state.levelReadable) throw IOException("Не удалось проверить level.dat")
         val raw = readLevel(world)
         val playerTag = findDataTag(raw, "Player")
         val uuidTag = findDataTag(raw, "singleplayer_uuid")
         if (playerTag != null && uuidTag != null) throw IOException("В level.dat одновременно есть Player и singleplayer_uuid")
+        if (guest != null) restoreLanOwner(world, owner, guest)
         when {
             uuidTag != null -> {
-                if (uuidTag.type != 11) throw IOException("Некорректный singleplayer_uuid")
-                if (java.nio.ByteBuffer.wrap(raw, uuidTag.payloadStart, 4).int != 4) {
-                    throw IOException("Некорректная длина singleplayer_uuid")
-                }
+                readUuid(raw, uuidTag)
                 val target = world.resolve("players/data/$owner.dat")
                 if (Files.exists(target, NOFOLLOW_LINKS)) {
                     if (!Files.isRegularFile(target, NOFOLLOW_LINKS)) throw IOException("Файл игрока должен быть обычным файлом: $target")
                     playerPayloadStart(readGzip(target))
                 }
-                val replacement = ByteArrayOutputStream().also { bytes ->
-                    DataOutputStream(bytes).use { output ->
-                        output.writeByte(11); output.writeUTF("singleplayer_uuid"); output.writeInt(4)
-                        output.writeInt((owner.mostSignificantBits shr 32).toInt())
-                        output.writeInt(owner.mostSignificantBits.toInt())
-                        output.writeInt((owner.leastSignificantBits shr 32).toInt())
-                        output.writeInt(owner.leastSignificantBits.toInt())
-                    }
-                }.toByteArray()
-                writeGzip(world.resolve("level.dat"), raw.splice(uuidTag, replacement))
+                writeGzip(world.resolve("level.dat"), raw.splice(uuidTag, uuidTag("singleplayer_uuid", owner)))
             }
             playerTag != null -> {
                 if (playerTag.type != 10) throw IOException("Некорректный Data.Player")

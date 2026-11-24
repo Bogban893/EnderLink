@@ -8,6 +8,7 @@ import org.enderlink.world.WorldScanner
 import org.enderlink.worldtransfer.ParentFingerprint
 import java.io.IOException
 import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -29,7 +30,9 @@ data class ManagedMinecraftSave(val directory: Path, val state: ManagedSaveState
 
 /** Installs a verified EnderLink version as an ordinary Minecraft Java save. */
 object MinecraftSaves {
-    private data class InstalledMarker(val manifest: WorldManifest, val contentHash: String? = null, val owner: UUID? = null)
+    private data class InstalledMarker(
+        val manifest: WorldManifest, val contentHash: String? = null, val owner: UUID? = null, val guest: UUID? = null,
+    )
     fun defaultDirectory(): Path {
         val home = Path.of(System.getProperty("user.home"))
         val os = System.getProperty("os.name").lowercase()
@@ -47,7 +50,7 @@ object MinecraftSaves {
         if (!Files.exists(lockPath, NOFOLLOW_LINKS)) return
         if (!Files.isRegularFile(lockPath, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.lockSymlink"))
         FileChannel.open(lockPath, READ, WRITE).use { channel ->
-            val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+            val lock = trySaveLock(channel)
                 ?: throw IOException(messages.text("minecraft.openBeforeReceive"))
             lock.use { }
         }
@@ -79,7 +82,7 @@ object MinecraftSaves {
                     !Files.isDirectory(target, NOFOLLOW_LINKS) || Files.isSymbolicLink(target) -> ManagedSaveState.CHANGED
                     !Files.isRegularFile(lockPath, NOFOLLOW_LINKS) -> ManagedSaveState.CHANGED
                     else -> FileChannel.open(lockPath, READ, WRITE).use { channel ->
-                        val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                        val lock = trySaveLock(channel)
                         if (lock == null) ManagedSaveState.OPEN
                         else lock.use { if (matches(target, installed)) ManagedSaveState.UNCHANGED else ManagedSaveState.CHANGED }
                     }
@@ -104,7 +107,7 @@ object MinecraftSaves {
         val session = target.resolve("session.lock")
         if (Files.isSymbolicLink(session)) throw IOException(messages.text("minecraft.lockSymlink"))
         FileChannel.open(session, CREATE, READ, WRITE).use { channel ->
-            val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+            val lock = trySaveLock(channel)
                 ?: throw IOException(messages.text("minecraft.openBeforeReceive"))
             lock.use { return repository.cacheObjectsFrom(target) }
         }
@@ -114,7 +117,9 @@ object MinecraftSaves {
         repository: WorldRepository, savesDirectory: Path, folderName: String,
         parentFingerprint: ParentFingerprint? = null,
         owner: UUID? = null,
+        guest: UUID? = null,
     ): MinecraftInstallResult {
+        require(guest == null || owner != null) { "Для LAN-профиля нужен UUID владельца" }
         validateName(folderName)
         repository.verifyCurrent()
         val incoming = repository.current() ?: throw IOException(messages.text("minecraft.noVersion"))
@@ -145,9 +150,9 @@ object MinecraftSaves {
                 val oldEntries = previous?.manifest?.entries.orEmpty().filterNot(::isSessionLock).associateBy { it.path }
                 val newEntries = incoming.entries.filterNot(::isSessionLock)
                 val changedFiles = newEntries.count { oldEntries[it.path] != it }
-                val replaced = if (previous != null && previous.owner != owner && owner != null) maxOf(changedFiles, 1) else changedFiles
+                val replaced = if (previous != null && (previous.owner != owner || previous.guest != guest) && owner != null) maxOf(changedFiles, 1) else changedFiles
                 val reused = newEntries.count { oldEntries[it.path] == it }
-                if (previous?.manifest?.versionId == incoming.versionId && previous.owner == owner) {
+                if (previous?.manifest?.versionId == incoming.versionId && previous.owner == owner && previous.guest == guest) {
                     writeMarker(marker, previous)
                     return MinecraftInstallResult(target, incoming.versionId, 0, reused)
                 }
@@ -161,39 +166,51 @@ object MinecraftSaves {
                 if (owner == null && (playerData.legacyEmbeddedPlayer || playerData.singleplayerUuid)) {
                     throw IOException(messages.text("minecraft.ownerRequired"))
                 }
-                if (owner != null) org.enderlink.world.PlayerDataInspector.prepareSingleplayerOwner(stage, owner)
-                val installed = InstalledMarker(incoming, if (owner == null) null else contentHash(stage, incoming), owner)
-                // Minecraft uses this lock while the save is open. Keep the staged lock across rename.
+                if (owner != null) org.enderlink.world.PlayerDataInspector.prepareSingleplayerOwner(stage, owner, guest)
+                val installed = InstalledMarker(incoming, if (owner == null) null else contentHash(stage, incoming), owner, guest)
+                // Windows cannot rename directories with open files. Other platforms keep the lock across rename.
                 FileChannel.open(stage.resolve("session.lock"), CREATE, READ, WRITE).use { stageChannel ->
-                    val stageLock = try { stageChannel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                    val stageLock = trySaveLock(stageChannel)
                         ?: throw IOException(messages.text("minecraft.stageLockFailed"))
-                    stageLock.use {
+                    try {
+                        closeForWindowsRename(stageChannel)
                         writeMarker(pending, installed)
                         if (Files.exists(target, NOFOLLOW_LINKS)) {
                             if (Files.isSymbolicLink(target.resolve("session.lock"))) {
                                 throw IOException(messages.text("minecraft.lockSymlink"))
                             }
                             FileChannel.open(target.resolve("session.lock"), CREATE, READ, WRITE).use { oldChannel ->
-                                val oldLock = try { oldChannel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                                val oldLock = trySaveLock(oldChannel)
                                     ?: throw IOException(messages.text("minecraft.openBeforeInstall"))
-                                oldLock.use {
+                                try {
                                     if (!matches(target, requireNotNull(previous))) {
                                         throw IOException(messages.text("minecraft.localChanges"))
                                     }
+                                    // An intervening Minecraft open prevents the directory rename on Windows.
+                                    closeForWindowsRename(oldChannel)
                                     move(target, backup)
                                     try { move(stage, target) }
                                     catch (error: Exception) { move(backup, target); throw error }
-                                }
+                                } finally { if (oldLock.isValid) oldLock.release() }
                             }
                         } else move(stage, target)
                         writeMarker(marker, installed)
                         Files.deleteIfExists(pending)
-                    }
+                    } finally { if (stageLock.isValid) stageLock.release() }
                 }
                 if (Files.exists(backup, NOFOLLOW_LINKS)) deleteTree(backup)
                 return MinecraftInstallResult(target, incoming.versionId, replaced, reused)
             }
         }
+    }
+
+    private fun trySaveLock(channel: FileChannel): FileLock? = try {
+        // Overlaps Minecraft's whole-file lock while allowing Windows to read session.lock during hashing.
+        channel.tryLock(Long.MAX_VALUE - 1, 1, false)
+    } catch (_: OverlappingFileLockException) { null }
+
+    private fun closeForWindowsRename(channel: FileChannel) {
+        if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) channel.close()
     }
 
     private fun findPrevious(
@@ -215,7 +232,8 @@ object MinecraftSaves {
                 ?: throw IOException(messages.text("minecraft.previousManifestMissing"))
             val installed = InstalledMarker(previous,
                 properties.getProperty("contentHash")?.also(::requireContentHash),
-                properties.getProperty("ownerUuid")?.let(UUID::fromString))
+                properties.getProperty("ownerUuid")?.let(UUID::fromString),
+                properties.getProperty("guestUuid")?.let(UUID::fromString))
             if (previous.worldId != incoming.worldId || !matches(target, installed)) {
                 throw IOException(messages.text("minecraft.localChanges"))
             }
@@ -271,7 +289,8 @@ object MinecraftSaves {
         if (manifest.worldId != properties.getProperty("worldId")) throw IOException(messages.text("minecraft.worldIdMismatch"))
         return InstalledMarker(manifest,
             properties.getProperty("contentHash")?.also(::requireContentHash),
-            properties.getProperty("ownerUuid")?.let(UUID::fromString))
+            properties.getProperty("ownerUuid")?.let(UUID::fromString),
+            properties.getProperty("guestUuid")?.let(UUID::fromString))
     }
 
     private fun matches(directory: Path, marker: InstalledMarker): Boolean =
@@ -304,6 +323,7 @@ object MinecraftSaves {
                 setProperty("versionId", marker.manifest.versionId)
                 marker.contentHash?.let { setProperty("contentHash", it) }
                 marker.owner?.let { setProperty("ownerUuid", it.toString()) }
+                marker.guest?.let { setProperty("guestUuid", it.toString()) }
             }.also { properties -> Files.newOutputStream(temp).use { properties.store(it, "EnderLink Minecraft save") } }
             move(temp, path, replace = true)
         } finally { Files.deleteIfExists(temp) }

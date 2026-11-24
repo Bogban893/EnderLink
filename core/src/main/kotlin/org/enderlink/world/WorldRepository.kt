@@ -106,8 +106,8 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
     /** Публикация закрытого мира. При публикации рабочего каталога игра уже могла изменить его байты. */
     fun publish(source: Path, worldId: String? = null): WorldManifest = locked { publishLocked(source, worldId) }
 
-    /** Publishes a closed singleplayer save after recording its current owner in a UUID file. */
-    fun publishSingleplayer(source: Path, owner: UUID): WorldManifest = locked {
+    /** Publishes a closed save, optionally synchronizing the owner's explicitly linked LAN guest profile in a private copy. */
+    fun publishSingleplayer(source: Path, owner: UUID, guest: UUID? = null): WorldManifest = locked {
         recoverLocked()
         val sourceRoot = source.toAbsolutePath().normalize()
         val actualSource = sourceRoot.toRealPath()
@@ -133,7 +133,7 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
             if (WorldScanner.scan(prepared, original.worldId).entries != original.entries) {
                 throw IOException("Мир изменился во время подготовки владельца")
             }
-            PlayerDataInspector.captureLegacyOwner(prepared, owner)
+            PlayerDataInspector.captureSingleplayerOwner(prepared, owner, guest)
             publishLocked(prepared, original.worldId)
         } finally { deleteTree(prepared) }
     }

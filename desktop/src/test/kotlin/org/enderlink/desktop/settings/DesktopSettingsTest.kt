@@ -87,6 +87,16 @@ class DesktopSettingsTest {
     }
 
     @Test
+    fun `LAN nickname is opt in and retains exact case after restart`() {
+        val path = root.resolve("desktop.properties")
+        assertEquals("", DesktopSettings(path).load().lanPlayerName)
+        DesktopSettings(path).save(DesktopPreferences(lanPlayerName = " PlayerA "))
+        assertEquals("PlayerA", DesktopSettings(path).load().lanPlayerName)
+        DesktopSettings(path).save(DesktopSettings(path).load().copy(lanPlayerName = ""))
+        assertEquals("", DesktopSettings(path).load().lanPlayerName)
+    }
+
+    @Test
     fun `each repository retains its own minecraft folder and parent fingerprint`() {
         val path = root.resolve("desktop.properties")
         val first = root.resolve("first").toString()

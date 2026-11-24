@@ -12,6 +12,7 @@ internal data class DesktopPreferences(
     val saves: String = MinecraftSaves.defaultDirectory().toString(),
     val saveName: String = "EnderLink World",
     val ownerUuid: String = "",
+    val lanPlayerName: String = "",
     val coordinatorUrl: String = "",
     val serverBase: String = "",
     val jar: String = "",
@@ -38,6 +39,7 @@ internal class DesktopSettings(
         saves = properties.getProperty("saves", MinecraftSaves.defaultDirectory().toString()),
         saveName = properties.getProperty("saveName", "EnderLink World"),
         ownerUuid = properties.getProperty("ownerUuid", ""),
+        lanPlayerName = properties.getProperty("lanPlayerName", ""),
         coordinatorUrl = properties.getProperty("coordinatorUrl", ""),
         serverBase = properties.getProperty("serverBase", ""),
         jar = properties.getProperty("jar", ""),
@@ -72,6 +74,7 @@ internal class DesktopSettings(
         properties.setProperty("saves", preferences.saves.trim())
         properties.setProperty("saveName", preferences.saveName.trim())
         properties.setProperty("ownerUuid", preferences.ownerUuid.trim())
+        properties.setProperty("lanPlayerName", preferences.lanPlayerName.trim())
         properties.setProperty("coordinatorUrl", preferences.coordinatorUrl.trim())
         properties.setProperty("serverBase", preferences.serverBase.trim())
         properties.setProperty("jar", preferences.jar.trim())

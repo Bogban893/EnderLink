@@ -27,6 +27,7 @@ internal class SendScreen(
 ) {
     val sourceField = field()
     val ownerField = field()
+    val lanNameField = field()
     val friendSend = combo(arrayOf(""))
     val sendHost = field("127.0.0.1")
     val sendPort = field("25570")
@@ -49,6 +50,8 @@ internal class SendScreen(
             add(gap(8)); add(label(messages.text("send.installedHint"), 12, C.muted))
             add(gap(12)); add(label(messages.text("send.closedHint"), 12, C.gold))
             add(gap(12)); add(label(messages.text("player.ownerUuidLabel"), 13, C.text, true)); add(gap(7)); add(ownerField)
+            add(gap(12)); add(label(messages.text("player.lanNameLabel"), 13, C.text, true)); add(gap(7)); add(lanNameField)
+            add(gap(7)); add(label(messages.text("player.lanNameHint"), 12, C.muted))
         }
         add(world); add(gap(20))
         add(routePanel(sendRoute, friendSend, sendHost, sendPort, true)); add(gap(20))

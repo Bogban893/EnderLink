@@ -50,12 +50,13 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
         repository: WorldRepository, source: Path?, target: TransferTarget,
         message: (String) -> Unit, progress: (Long, Long) -> Unit,
         owner: UUID? = null,
+        guest: UUID? = null,
     ): WorldTransferStats {
         if (source != null) {
             message(messages.text("transfer.publishing"))
             try {
                 MinecraftSaves.requireClosed(source)
-                if (owner == null) repository.publish(source) else repository.publishSingleplayer(source, owner)
+                if (owner == null) repository.publish(source) else repository.publishSingleplayer(source, owner, guest)
             }
             catch (error: IOException) { throw WorldPublicationException(error) }
         }

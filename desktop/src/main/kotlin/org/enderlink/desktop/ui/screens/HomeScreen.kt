@@ -27,6 +27,7 @@ internal class HomeScreen(
     onChooseLibraryRoot: () -> Unit = {},
 ) {
     val ownerField = field()
+    val lanNameField = field()
     val statusWorld = label(messages.text("repository.unselected"), 19, C.text, true)
     val statusDetail = label(messages.text("repository.selectHint"), 13, C.muted)
     val playerHint = label("", 13, C.gold)
@@ -57,6 +58,9 @@ internal class HomeScreen(
         add(Surface().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(label(messages.text("home.library"), 11, C.green, true)); add(gap(9))
+            add(label(messages.text("player.ownerUuidLabel"), 13, C.text, true)); add(gap(7)); add(ownerField)
+            add(gap(12)); add(label(messages.text("player.lanNameLabel"), 13, C.text, true)); add(gap(7)); add(lanNameField)
+            add(gap(7)); add(label(messages.text("player.lanNameHint"), 12, C.muted)); add(gap(12))
             add(horizontal(libraryWorlds, BlockButton(messages.text("action.openLibraryWorld")).also { actionButtons += it }.apply {
                 addActionListener { onSelectLibrary(libraryWorlds.selectedIndex) }
             }))
@@ -75,9 +79,9 @@ internal class HomeScreen(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(label(messages.text("home.legacyOwner"), 11, C.gold, true)); add(gap(9))
             add(label(messages.text("home.legacyOwnerHint"), 12, C.muted))
-            add(gap(12)); add(horizontal(ownerField, BlockButton(messages.text("action.importOwner")).also { actionButtons += it }.apply {
+            add(gap(12)); add(BlockButton(messages.text("action.importOwner")).also { actionButtons += it }.apply {
                 addActionListener { onImportOwner() }
-            }))
+            })
         }); add(gap(24))
         add(label(messages.text("home.howItWorks"), 12, C.gold, true)); add(gap(12))
         add(horizontal(

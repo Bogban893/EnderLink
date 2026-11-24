@@ -81,9 +81,12 @@ internal class DesktopController(
         view.receiveScreen.savesField.text = preferences.saves
         view.receiveScreen.saveNameField.text = preferences.saveName
         ownerUuid = preferences.ownerUuid
+        view.receiveScreen.ownerField.document = view.sendScreen.ownerField.document
+        view.homeScreen.ownerField.document = view.sendScreen.ownerField.document
         view.sendScreen.ownerField.text = ownerUuid
-        view.receiveScreen.ownerField.text = ownerUuid
-        view.homeScreen.ownerField.text = ownerUuid
+        view.receiveScreen.lanNameField.document = view.sendScreen.lanNameField.document
+        view.homeScreen.lanNameField.document = view.sendScreen.lanNameField.document
+        view.sendScreen.lanNameField.text = preferences.lanPlayerName
         view.serverScreen.serverBaseField.text = preferences.serverBase
         view.serverScreen.jarField.text = preferences.jar
         lastParentFingerprint = worldStates[activeRepositoryPath]?.parentFingerprint ?: preferences.parentFingerprint
@@ -132,7 +135,9 @@ internal class DesktopController(
         }
         val target = target(view.sendScreen.sendRoute, view.sendScreen.friendSend, view.sendScreen.sendHost, view.sendScreen.sendPort) ?: return
         val repository = repository() ?: return
-        val owner = if (source != null) selectedOwner(view.sendScreen.ownerField) ?: return else null
+        val identity = if (source != null) selectedPlayer(view.sendScreen.ownerField) ?: return else null
+        val owner = identity?.first
+        val guest = identity?.second
         if (owner != null) ownerUuid = owner.toString()
         if (source != null) {
             val origin = source.toAbsolutePath().normalize()
@@ -167,7 +172,7 @@ internal class DesktopController(
                     }
                 }
             }
-            try { operations.send(repository, source, target, ::statusAsync, progress::update, owner) }
+            try { operations.send(repository, source, target, ::statusAsync, progress::update, owner, guest) }
             catch (error: WorldPublicationException) { throw error }
             catch (error: IOException) { throw TransferOperationException(transferId, error) }
         }) { result ->
@@ -249,7 +254,7 @@ internal class DesktopController(
         if (!Files.isRegularFile(sourcePath.resolve("level.dat"), NOFOLLOW_LINKS)) {
             dialogs.warning(messages.text("transfer.source.required")); return
         }
-        val owner = selectedOwner(view.homeScreen.ownerField) ?: return
+        val (owner, guest) = selectedPlayer(view.homeScreen.ownerField) ?: return
         ownerUuid = owner.toString()
         val saves = view.receiveScreen.savesField.text.trim().takeIf(String::isNotBlank)
             ?: run { dialogs.warning(messages.text("minecraft.saves.required")); return }
@@ -260,7 +265,7 @@ internal class DesktopController(
             val repositoryPath = library.create()
             val repository = WorldRepository(repositoryPath)
             MinecraftSaves.requireClosed(sourcePath)
-            repository.publishSingleplayer(sourcePath, owner)
+            repository.publishSingleplayer(sourcePath, owner, guest)
             runCatching { library.name(repositoryPath, sourcePath.fileName.toString()) }
                 .onFailure { System.err.println("EnderLink library name: ${it.message}") }
             repositoryPath
@@ -302,7 +307,7 @@ internal class DesktopController(
         val repository = repository() ?: return
         val saves = minecraftDestination() ?: return
         val libraryRoot = Path.of(view.homeScreen.libraryRootField.text)
-        val owner = selectedOwner(view.receiveScreen.ownerField) ?: return
+        val (owner, guest) = selectedPlayer(view.receiveScreen.ownerField) ?: return
         ownerUuid = owner.toString()
         saveSettings()
         progress.receiving = true
@@ -331,7 +336,7 @@ internal class DesktopController(
             installingMinecraft = true
             SwingUtilities.invokeLater { view.setCanCancel(false) }
             statusAsync(messages.text("transfer.installing"))
-            val installed = try { MinecraftSaves.install(repository, saves.first, saves.second, result.parentFingerprint, owner) }
+            val installed = try { MinecraftSaves.install(repository, saves.first, saves.second, result.parentFingerprint, owner, guest) }
             catch (error: Exception) {
                 throw IOException(messages.text("minecraft.receivedInstallFailed", error.message), error)
             }
@@ -371,11 +376,11 @@ internal class DesktopController(
         if (servers.isRunning) { dialogs.warning(messages.text("server.stopFirst")); return }
         val repository = repository() ?: return
         val destination = minecraftDestination() ?: return
-        val owner = selectedOwner(view.receiveScreen.ownerField) ?: return
+        val (owner, guest) = selectedPlayer(view.receiveScreen.ownerField) ?: return
         ownerUuid = owner.toString()
         saveSettings()
         jobs.run(messages.text("minecraft.installing"), {
-            MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint, owner)
+            MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint, owner, guest)
         }) { installed ->
             view.status(messages.text("minecraft.updated", installed.directory))
             view.receiveScreen.receiveProgressText.text = messages.text("minecraft.updatedSummary", installed.directory, installed.replacedFiles.toString())
@@ -572,6 +577,7 @@ internal class DesktopController(
             saves = view.receiveScreen.savesField.text,
             saveName = view.receiveScreen.saveNameField.text,
             ownerUuid = ownerUuid,
+            lanPlayerName = view.sendScreen.lanNameField.text,
             coordinatorUrl = operations.coordinatorUrl,
             serverBase = view.serverScreen.serverBaseField.text,
             jar = view.serverScreen.jarField.text,
@@ -612,6 +618,17 @@ internal class DesktopController(
         throw IOException(messages.text("minecraft.folder.required"))
     }
     private class TransferOperationException(val id: UUID, cause: IOException) : IOException(cause.message, cause)
+
+    private fun selectedPlayer(field: javax.swing.JTextField): Pair<UUID, UUID?>? {
+        val owner = selectedOwner(field) ?: return null
+        val name = view.sendScreen.lanNameField.text.trim()
+        val guest = if (name.isEmpty()) null else try { PlayerDataInspector.offlineUuid(name) }
+        catch (_: IllegalArgumentException) {
+            dialogs.warning(messages.text("player.lanNameInvalid"))
+            return null
+        }
+        return owner to guest
+    }
 
     private fun selectedOwner(field: javax.swing.JTextField): UUID? {
         val raw = field.text.trim().lowercase()
