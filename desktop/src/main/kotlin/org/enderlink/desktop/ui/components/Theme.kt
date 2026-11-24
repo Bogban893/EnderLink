@@ -1,4 +1,4 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.ui.components
 
 import java.awt.BasicStroke
 import java.awt.Color
