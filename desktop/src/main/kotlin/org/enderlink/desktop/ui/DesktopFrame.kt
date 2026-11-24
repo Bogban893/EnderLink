@@ -9,6 +9,7 @@ import java.awt.event.FocusEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.swing.JButton
+import javax.swing.BorderFactory
 import javax.swing.JFrame
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -16,6 +17,7 @@ import javax.swing.Timer
 import javax.swing.border.EmptyBorder
 import org.enderlink.desktop.ui.components.BlockButton
 import org.enderlink.desktop.ui.components.C
+import org.enderlink.desktop.ui.components.NavigationIcon
 import org.enderlink.desktop.ui.components.UiScale
 import org.enderlink.desktop.ui.components.field
 import org.enderlink.desktop.ui.components.font
@@ -36,16 +38,20 @@ internal class DesktopFrame : JFrame(messages.text("app.title")) {
     private val nav = mutableMapOf<String, JButton>()
     val repositoryField = field()
     private val statusLine = label(messages.text("status.ready"), 13, C.muted)
+    private var busy = false
 
     val homeScreen = HomeScreen(::showPage, { controller.refreshStatus() },
-        { controller.openWorldFolder() }, { controller.importOwner() })
+        { controller.openWorldFolder() }, { controller.importOwner() }, { controller.sendCurrent() },
+        { controller.selectLibraryWorld(it) }, { controller.newWorld() }, { controller.importWorld() },
+        { controller.chooseLibraryRoot() })
     val sendScreen = SendScreen({ controller.chooseDirectory(it) },
-        { controller.startSend() }, { controller.cancelOperation() })
+        { controller.startSend() }, { controller.cancelOperation() }, { controller.selectInstalledForSend() })
     val receiveScreen = ReceiveScreen({ controller.chooseDirectory(it) },
         { controller.startReceive() }, { controller.cancelOperation() }, { controller.installMinecraft() })
     val serverScreen = ServerScreen({ controller.chooseDirectory(it) }, { controller.chooseFile(it) },
         { controller.servers.startServer() }, { controller.servers.stopServer() })
-    val friendsScreen = FriendsScreen({ controller.addFriend() }, { controller.refreshFriends() }, ::status)
+    val friendsScreen = FriendsScreen({ controller.addFriend() }, { controller.refreshFriends() },
+        { controller.saveCoordinator() }, ::status)
     private val actionButtons = homeScreen.actionButtons + sendScreen.actionButtons +
         receiveScreen.actionButtons + serverScreen.actionButtons + friendsScreen.actionButtons
     private val cancelButtons = sendScreen.cancelButtons + receiveScreen.cancelButtons
@@ -78,10 +84,25 @@ internal class DesktopFrame : JFrame(messages.text("app.title")) {
         super.dispose()
     }
 
-    fun status(text: String) { statusLine.text = text }
+    fun status(text: String) {
+        statusLine.text = if (busy) "… $text" else text
+        statusLine.foreground = if (busy) C.gold else C.muted
+    }
+
+    fun statusSuccess(text: String) { statusLine.text = "✓ $text"; statusLine.foreground = C.green }
+    fun statusWarning(text: String) { statusLine.text = "! $text"; statusLine.foreground = C.gold }
+    fun statusError(text: String) { statusLine.text = "! $text"; statusLine.foreground = C.red }
+    fun statusCancelled(text: String) { statusLine.text = "■ $text"; statusLine.foreground = C.gold }
+    fun showSend() = showPage("send")
+    fun showReceive() = showPage("receive")
 
     fun setBusy(busy: Boolean, cancellable: Boolean) {
+        this.busy = busy
         actionButtons.forEach { it.isEnabled = !busy }
+        repositoryField.isEnabled = !busy
+        homeScreen.libraryWorlds.isEnabled = !busy
+        receiveScreen.savesField.isEnabled = !busy
+        receiveScreen.saveNameField.isEnabled = !busy
         setCanCancel(busy && cancellable)
     }
 
@@ -105,8 +126,14 @@ internal class DesktopFrame : JFrame(messages.text("app.title")) {
             val button = JButton(title).apply {
                 font = font(14, true); foreground = C.muted; background = C.sidebar
                 horizontalAlignment = JLabel.LEFT; isFocusPainted = false
-                border = EmptyBorder(12, 13, 12, 8)
+                icon = NavigationIcon(id)
+                iconTextGap = UiScale.px(11)
+                border = navBorder(false)
                 maximumSize = Dimension(Int.MAX_VALUE, 48)
+                addFocusListener(object : FocusAdapter() {
+                    override fun focusGained(e: FocusEvent) { border = navBorder(true) }
+                    override fun focusLost(e: FocusEvent) { border = navBorder(false) }
+                })
                 addActionListener { showPage(id) }
             }
             nav[id] = button
@@ -154,4 +181,9 @@ internal class DesktopFrame : JFrame(messages.text("app.title")) {
             button.foreground = if (page == id) C.green else C.muted
         }
     }
+
+    private fun navBorder(focused: Boolean) = BorderFactory.createCompoundBorder(
+        BorderFactory.createLineBorder(if (focused) C.gold else C.sidebar, 2),
+        EmptyBorder(10, 11, 10, 6),
+    )
 }

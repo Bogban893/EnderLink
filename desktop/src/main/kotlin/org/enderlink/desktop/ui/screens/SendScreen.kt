@@ -23,8 +23,10 @@ internal class SendScreen(
     onChooseDirectory: (JTextField) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
+    onSelectInstalled: () -> Unit = {},
 ) {
     val sourceField = field()
+    val ownerField = field()
     val friendSend = combo(arrayOf(""))
     val sendHost = field("127.0.0.1")
     val sendPort = field("25570")
@@ -41,7 +43,12 @@ internal class SendScreen(
             add(label(messages.text("send.sourceLabel"), 13, C.text, true)); add(gap(7))
             add(horizontal(sourceField, BlockButton(messages.text("action.select")).apply { addActionListener { onChooseDirectory(sourceField) } }))
             add(gap(10)); add(label(messages.text("send.existingHint"), 12, C.muted))
+            add(gap(10)); add(BlockButton(messages.text("action.selectInstalled")).also { actionButtons += it }.apply {
+                addActionListener { onSelectInstalled() }
+            })
+            add(gap(8)); add(label(messages.text("send.installedHint"), 12, C.muted))
             add(gap(12)); add(label(messages.text("send.closedHint"), 12, C.gold))
+            add(gap(12)); add(label(messages.text("player.ownerUuidLabel"), 13, C.text, true)); add(gap(7)); add(ownerField)
         }
         add(world); add(gap(20))
         add(routePanel(sendRoute, friendSend, sendHost, sendPort, true)); add(gap(20))

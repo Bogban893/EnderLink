@@ -5,19 +5,33 @@ import computer.iroh.Endpoint
 import computer.iroh.EndpointAddr
 import computer.iroh.EndpointId
 import computer.iroh.IrohException
+import org.enderlink.network.discovery.DiscoveryRecord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 internal suspend fun dialFriend(
-    endpoint: Endpoint, profile: IrohProfile, target: String, explicitRelay: String?, log: (String) -> Unit,
+    endpoint: Endpoint, profile: IrohProfile, target: String, explicitRelay: String?,
+    known: DiscoveryRecord?, log: (String) -> Unit,
 ): Connection {
     EndpointId.fromString(target).use { id ->
         suspend fun attempt(relay: String?): Connection = EndpointAddr(id, relay, emptyList()).use { addr ->
             withTimeout(60_000) { endpoint.connect(addr, IROH_ALPN) }
         }
         try {
+            if (known != null) {
+                require(known.id == target) { "ID записи координатора не совпадает с выбранным другом" }
+                try {
+                    log("Используются адреса друга от координатора")
+                    return EndpointAddr(id, known.relay, known.directAddresses).use { addr ->
+                        withTimeout(10_000) { endpoint.connect(addr, IROH_ALPN) }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                    log("Адреса координатора не сработали. Повторяем обычное подключение iroh…")
+                }
+            }
             if (explicitRelay != null) {
                 log("Relay друга задан явно: $explicitRelay")
                 return attempt(explicitRelay)

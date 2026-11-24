@@ -71,6 +71,12 @@ class IrohProfile private constructor(
 
     fun friendName(remoteId: String): String? = friends().entries.firstOrNull { it.value == remoteId }?.key
 
+    /** Signs a short coordinator challenge without exposing the profile secret key. */
+    fun signProof(payload: ByteArray): ByteArray {
+        require(payload.size <= 32 * 1024) { "Слишком большой запрос координатору" }
+        return SecretKey.fromBytes(key).use { secret -> secret.sign(payload).use { it.toBytes() } }
+    }
+
     fun relayFor(remoteId: String): String? = relays.getProperty(remoteId)?.takeIf { raw ->
         runCatching { validateRelay(raw); true }.getOrDefault(false)
     }

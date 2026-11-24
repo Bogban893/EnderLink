@@ -65,4 +65,46 @@ class DesktopSettingsTest {
         assertEquals("repo", loaded.repository)
         assertNull(loaded.parentFingerprint)
     }
+
+    @Test
+    fun `world library paths survive restart and can be removed`() {
+        val path = root.resolve("desktop.properties")
+        val first = root.resolve("world A").toString()
+        val second = root.resolve("world B").toString()
+        DesktopSettings(path).save(DesktopPreferences(libraryRoot = root.resolve("managed worlds").toString(),
+            knownRepositories = listOf(first, second, first)))
+        assertEquals(listOf(first, second), DesktopSettings(path).load().knownRepositories)
+        assertEquals(root.resolve("managed worlds").toString(), DesktopSettings(path).load().libraryRoot)
+        DesktopSettings(path).save(DesktopSettings(path).load().copy(knownRepositories = listOf(second)))
+        assertEquals(listOf(second), DesktopSettings(path).load().knownRepositories)
+    }
+
+    @Test
+    fun `coordinator address survives restart`() {
+        val path = root.resolve("desktop.properties")
+        DesktopSettings(path).save(DesktopPreferences(coordinatorUrl = " https://discovery.example "))
+        assertEquals("https://discovery.example", DesktopSettings(path).load().coordinatorUrl)
+    }
+
+    @Test
+    fun `each repository retains its own minecraft folder and parent fingerprint`() {
+        val path = root.resolve("desktop.properties")
+        val first = root.resolve("first").toString()
+        val second = root.resolve("second").toString()
+        val parent = ParentFingerprint("sha256:" + "a".repeat(64), 2, "sha256:" + "b".repeat(64))
+        val states = mapOf(first to WorldUiState("Первый мир", parent), second to WorldUiState("Второй мир", null))
+        DesktopSettings(path).save(DesktopPreferences(repository = first, worldStates = states))
+        assertEquals(states, DesktopSettings(path).load().worldStates)
+    }
+
+    @Test
+    fun `chooser folders are saved independently and unknown keys are ignored`() {
+        val path = root.resolve("desktop.properties")
+        val folders = mapOf("source" to root.resolve("Мир с пробелом").toString(),
+            "saves" to root.resolve("другой launcher/saves").toString(), "jar" to root.toString())
+        DesktopSettings(path).save(DesktopPreferences(chooserDirectories = folders + ("unknown" to "ignored")))
+        assertEquals(folders, DesktopSettings(path).load().chooserDirectories)
+        DesktopSettings(path).save(DesktopSettings(path).load().copy(chooserDirectories = folders - "source"))
+        assertEquals(folders - "source", DesktopSettings(path).load().chooserDirectories)
+    }
 }

@@ -6,6 +6,9 @@ import javax.swing.ButtonGroup
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JRadioButton
+import javax.swing.BorderFactory
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 
 internal fun routePanel(group: Pair<JRadioButton, JRadioButton>, friend: javax.swing.JComboBox<String>,
                        host: javax.swing.JTextField?, port: javax.swing.JTextField, sending: Boolean): JPanel = Surface().apply {
@@ -37,6 +40,11 @@ internal fun routeGroup(): Pair<JRadioButton, JRadioButton> {
     for (button in listOf(first, second)) {
         button.font = font(13, true); button.foreground = C.text; button.background = C.panel
         button.isFocusPainted = false
+        button.border = BorderFactory.createLineBorder(C.panel, UiScale.px(2))
+        button.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) { button.border = BorderFactory.createLineBorder(C.gold, UiScale.px(2)) }
+            override fun focusLost(e: FocusEvent) { button.border = BorderFactory.createLineBorder(C.panel, UiScale.px(2)) }
+        })
         button.icon = PixelRadioIcon(false)
         button.selectedIcon = PixelRadioIcon(true)
         button.iconTextGap = 9

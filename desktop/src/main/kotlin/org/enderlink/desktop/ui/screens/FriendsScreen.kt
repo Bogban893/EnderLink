@@ -18,11 +18,13 @@ import java.awt.datatransfer.StringSelection
 internal class FriendsScreen(
     onAdd: () -> Unit,
     onRefresh: () -> Unit,
+    onSaveCoordinator: () -> Unit,
     onStatus: (String) -> Unit,
 ) {
     val ownId = field()
     val friendName = field()
     val friendId = field()
+    val coordinatorUrl = field()
     val friendsList = label(messages.text("friends.loading"), 14, C.muted)
     val actionButtons = mutableListOf<JButton>()
 
@@ -49,6 +51,16 @@ internal class FriendsScreen(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(label(messages.text("friends.savedSection"), 11, C.green, true)); add(gap(11)); add(friendsList)
             add(gap(15)); add(BlockButton(messages.text("action.refreshFriends")).apply { addActionListener { onRefresh() } })
+        })
+        add(gap(20))
+        add(Surface().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(label(messages.text("discovery.addressLabel"), 11, C.green, true)); add(gap(10))
+            add(coordinatorUrl); add(gap(10))
+            add(label(messages.text("discovery.addressHint"), 12, C.muted)); add(gap(14))
+            add(BlockButton(messages.text("discovery.save")).also { actionButtons += it }.apply {
+                addActionListener { onSaveCoordinator() }
+            })
         })
     }
 }
