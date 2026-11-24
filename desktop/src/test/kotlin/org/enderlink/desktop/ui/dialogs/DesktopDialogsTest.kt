@@ -58,6 +58,18 @@ class DesktopDialogsTest {
         assertContentEquals(arrayOf("jar"), filter.extensions)
     }
 
+    @Test
+    fun `chooser opens nearest existing parent for typed paths`() = onEdt {
+        val folder = Files.createDirectory(root.resolve("папка с пробелами"))
+        val chooser = TestChooser(SystemFileChooser.CANCEL_OPTION)
+        val dialogs = DesktopDialogs(JPanel()) { chooser }
+
+        dialogs.chooseDirectory(folder.resolve("new/world").toString())
+        assertEquals(folder.toFile(), chooser.openedDirectory)
+        dialogs.chooseJar(folder.resolve("server.jar").toString())
+        assertEquals(folder.toFile(), chooser.openedDirectory)
+    }
+
     private class TestChooser(private val result: Int, private val selection: File? = null) : SystemFileChooser() {
         var openedParent: Component? = null
         var openedDirectory: File? = null

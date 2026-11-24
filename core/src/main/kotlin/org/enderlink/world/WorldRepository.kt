@@ -106,6 +106,38 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
     /** Публикация закрытого мира. При публикации рабочего каталога игра уже могла изменить его байты. */
     fun publish(source: Path, worldId: String? = null): WorldManifest = locked { publishLocked(source, worldId) }
 
+    /** Publishes a closed singleplayer save after recording its current owner in a UUID file. */
+    fun publishSingleplayer(source: Path, owner: UUID): WorldManifest = locked {
+        recoverLocked()
+        val sourceRoot = source.toAbsolutePath().normalize()
+        val actualSource = sourceRoot.toRealPath()
+        val actualRoot = root.toRealPath()
+        if (actualSource.startsWith(actualRoot) || actualRoot.startsWith(actualSource)) {
+            throw IOException("Для публикации владельца выберите закрытый мир вне хранилища EnderLink")
+        }
+        val original = WorldScanner.scan(sourceRoot, readActive()?.worldId ?: WorldManifest.newWorldId())
+        val prepared = Files.createTempDirectory(meta, "owner-")
+        try {
+            Files.walkFileTree(sourceRoot, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    if (!attrs.isDirectory) throw IOException("Мир содержит ссылку или необычный каталог: $dir")
+                    if (dir != sourceRoot) Files.createDirectory(prepared.resolve(sourceRoot.relativize(dir)))
+                    return FileVisitResult.CONTINUE
+                }
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    if (!attrs.isRegularFile) throw IOException("Мир содержит ссылку или необычный файл: $file")
+                    Files.copy(file, prepared.resolve(sourceRoot.relativize(file)), NOFOLLOW_LINKS)
+                    return FileVisitResult.CONTINUE
+                }
+            })
+            if (WorldScanner.scan(prepared, original.worldId).entries != original.entries) {
+                throw IOException("Мир изменился во время подготовки владельца")
+            }
+            PlayerDataInspector.captureLegacyOwner(prepared, owner)
+            publishLocked(prepared, original.worldId)
+        } finally { deleteTree(prepared) }
+    }
+
     /** Saves blocks from an existing local Minecraft world without making it the active version. */
     fun cacheObjectsFrom(source: Path): Int = locked {
         val directory = source.toAbsolutePath().normalize()

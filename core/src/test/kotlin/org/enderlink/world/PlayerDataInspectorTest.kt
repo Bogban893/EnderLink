@@ -98,7 +98,86 @@ class PlayerDataInspectorTest {
         assertFalse(Files.exists(repository.workingDirectory.resolve("playerdata/$owner.dat")))
     }
 
-    private fun writeLevel(withPlayer: Boolean, withUuid: Boolean, world: Path = root) {
+    @Test
+    fun `цикл старого одиночного мира сохраняет данные обоих владельцев`() {
+        val ownerA = UUID.fromString("123e4567-e89b-12d3-a456-426614174000")
+        val ownerB = UUID.fromString("123e4567-e89b-12d3-a456-426614174001")
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(withPlayer = true, withUuid = false, world = source, item = "minecraft:diamond")
+        val original = Files.readAllBytes(source.resolve("level.dat"))
+        val repo = WorldRepository(root.resolve("repository"))
+        val first = repo.publishSingleplayer(source, ownerA)
+        assertContentEquals(original, Files.readAllBytes(source.resolve("level.dat")))
+        val saveB = Files.createDirectory(root.resolve("save-b"))
+        copyWorld(repo.workingDirectory, saveB)
+        PlayerDataInspector.prepareSingleplayerOwner(saveB, ownerB)
+        assertFalse(PlayerDataInspector.inspect(saveB).legacyEmbeddedPlayer)
+        assertTrue(String(readPlayer(saveB.resolve("playerdata/$ownerA.dat")), Charsets.ISO_8859_1).contains("minecraft:diamond"))
+
+        // Simulate B closing Minecraft after obtaining a different item.
+        writeLevel(withPlayer = true, withUuid = false, world = saveB, item = "minecraft:emerald")
+        val second = repo.publishSingleplayer(saveB, ownerB)
+        assertEquals(first.versionId, second.parentVersionId)
+        assertTrue(String(readPlayer(repo.workingDirectory.resolve("playerdata/$ownerB.dat")), Charsets.ISO_8859_1).contains("minecraft:emerald"))
+        val saveA = Files.createDirectory(root.resolve("save-a"))
+        copyWorld(repo.workingDirectory, saveA)
+        PlayerDataInspector.prepareSingleplayerOwner(saveA, ownerA)
+        assertTrue(String(PlayerDataInspector.extractLegacyPlayer(saveA), Charsets.ISO_8859_1).contains("minecraft:diamond"))
+        assertTrue(String(readPlayer(saveA.resolve("playerdata/$ownerB.dat")), Charsets.ISO_8859_1).contains("minecraft:emerald"))
+        assertContentEquals(original, Files.readAllBytes(source.resolve("level.dat")))
+    }
+
+    @Test
+    fun `подготовка отклоняет мир без записи прежнего владельца`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(withPlayer = true, withUuid = false, world = source)
+        val before = Files.readAllBytes(source.resolve("level.dat"))
+        assertFailsWith<IOException> { PlayerDataInspector.prepareSingleplayerOwner(source, UUID.randomUUID()) }
+        assertContentEquals(before, Files.readAllBytes(source.resolve("level.dat")))
+    }
+
+    @Test
+    fun `новый формат переключает ссылку UUID без изменения файлов игроков`() {
+        val owner = UUID.fromString("123e4567-e89b-12d3-a456-426614174001")
+        writeLevel(withPlayer = false, withUuid = true)
+        val playerDirectory = Files.createDirectories(root.resolve("players/data"))
+        val player = playerDirectory.resolve("$owner.dat")
+        DataOutputStream(GZIPOutputStream(Files.newOutputStream(player))).use { output ->
+            output.writeByte(10); output.writeUTF(""); output.writeByte(0)
+        }
+        val originalPlayer = Files.readAllBytes(player)
+        PlayerDataInspector.prepareSingleplayerOwner(root, owner)
+        val raw = GZIPInputStream(Files.newInputStream(root.resolve("level.dat"))).use { it.readAllBytes() }
+        val uuidBytes = java.nio.ByteBuffer.allocate(16)
+            .putLong(owner.mostSignificantBits).putLong(owner.leastSignificantBits).array()
+        assertTrue(raw.asList().windowed(16).any { it.toByteArray().contentEquals(uuidBytes) })
+        assertContentEquals(originalPlayer, Files.readAllBytes(player))
+    }
+
+    @Test
+    fun `повреждённый файл нового владельца не меняет level dat`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(withPlayer = true, withUuid = false, world = source)
+        PlayerDataInspector.captureLegacyOwner(source, UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
+        val ownerB = UUID.fromString("123e4567-e89b-12d3-a456-426614174001")
+        Files.writeString(source.resolve("playerdata/$ownerB.dat"), "broken")
+        val before = Files.readAllBytes(source.resolve("level.dat"))
+        assertFailsWith<IOException> { PlayerDataInspector.prepareSingleplayerOwner(source, ownerB) }
+        assertContentEquals(before, Files.readAllBytes(source.resolve("level.dat")))
+    }
+
+    private fun readPlayer(path: Path): ByteArray = GZIPInputStream(Files.newInputStream(path)).use { it.readAllBytes() }
+
+    private fun copyWorld(source: Path, destination: Path) {
+        Files.walk(source).use { paths ->
+            paths.filter { it != source }.forEach { path ->
+                val target = destination.resolve(source.relativize(path))
+                if (Files.isDirectory(path)) Files.createDirectories(target) else Files.copy(path, target)
+            }
+        }
+    }
+
+    private fun writeLevel(withPlayer: Boolean, withUuid: Boolean, world: Path = root, item: String = "minecraft:diamond") {
         DataOutputStream(GZIPOutputStream(Files.newOutputStream(world.resolve("level.dat")))).use { output ->
             output.writeByte(10)
             output.writeUTF("")
@@ -120,7 +199,7 @@ class PlayerDataInspectorTest {
                 output.writeInt(1)
                 output.writeByte(8)
                 output.writeUTF("id")
-                output.writeUTF("minecraft:diamond")
+                output.writeUTF(item)
                 output.writeByte(0)
                 output.writeByte(0)
             }

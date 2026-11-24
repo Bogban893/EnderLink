@@ -2,6 +2,8 @@ package org.enderlink.desktop.transfer
 
 import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.minecraft.MinecraftSaves
+import org.enderlink.network.RemoteTransferException
+import org.enderlink.network.TransferRejectedException
 import org.enderlink.world.WorldRepository
 import org.enderlink.worldtransfer.WorldTransferStats
 import org.junit.jupiter.api.Timeout
@@ -9,17 +11,29 @@ import org.junit.jupiter.api.io.TempDir
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 @Timeout(20)
 class DesktopOperationsTest {
     @TempDir lateinit var root: Path
+
+    @Test
+    fun `publication failure stays distinct from a network failure`() {
+        val repository = WorldRepository(root.resolve("repository"))
+        val failure = assertFailsWith<WorldPublicationException> {
+            DesktopOperations(root.resolve("profile")).send(repository, root.resolve("missing-world"),
+                TransferTarget(Route.LOCAL, host = "127.0.0.1", port = 1), {}, { _, _ -> })
+        }
+        assertTrue(failure.cause != null)
+    }
 
     @Test
     fun `quick send publishes a closed world and receives it over tcp`() {
@@ -31,13 +45,19 @@ class DesktopOperationsTest {
         val receiver = WorldRepository(root.resolve("receiver"))
         val port = ServerSocket(0).use { it.localPort }
         val waiting = CountDownLatch(1)
+        val approved = AtomicBoolean(false)
         val executor = Executors.newSingleThreadExecutor()
         try {
             val incoming = executor.submit<WorldTransferStats> {
                 DesktopOperations(root.resolve("receiver-profile")).apply { begin() }.receive(
                     receiver, TransferTarget(Route.LOCAL, port = port),
                     { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> },
-                )
+                ) { offered, peerId ->
+                    assertTrue(offered.entries.isNotEmpty())
+                    assertEquals(null, peerId)
+                    approved.set(true)
+                    true
+                }
             }
             assertTrue(waiting.await(5, TimeUnit.SECONDS))
             val stats = DesktopOperations(root.resolve("sender-profile")).apply { begin() }.send(
@@ -45,6 +65,7 @@ class DesktopOperationsTest {
             )
             assertTrue(stats.transferredBytes >= 300_000)
             assertEquals(sender.current()!!.versionId, incoming.get(5, TimeUnit.SECONDS).versionId)
+            assertTrue(approved.get())
             assertTrue(Files.readAllBytes(source.resolve("region/r.0.0.mca")).contentEquals(
                 Files.readAllBytes(receiver.workingDirectory.resolve("region/r.0.0.mca")),
             ))
@@ -94,6 +115,82 @@ class DesktopOperationsTest {
             assertTrue(incoming.get(5, TimeUnit.SECONDS).isFailure)
             assertTrue(operations.wasCancelled)
             assertEquals(null, receiver.current())
+        } finally { executor.shutdownNow() }
+    }
+
+    @Test
+    fun `desktop receiver can decline a proposed version`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        Files.writeString(source.resolve("level.dat"), "example world")
+        val sender = WorldRepository(root.resolve("sender"))
+        sender.publish(source)
+        val receiver = WorldRepository(root.resolve("receiver"))
+        val port = ServerSocket(0).use { it.localPort }
+        val waiting = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val incoming = executor.submit<Result<WorldTransferStats>> {
+                runCatching {
+                    DesktopOperations(root.resolve("receiver-profile")).apply { begin() }.receive(
+                        receiver, TransferTarget(Route.LOCAL, port = port),
+                        { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() },
+                        { _, _ -> },
+                    ) { offered, peerId ->
+                        assertEquals(sender.current()!!.versionId, offered.versionId)
+                        assertEquals(null, peerId)
+                        false
+                    }
+                }
+            }
+            assertTrue(waiting.await(5, TimeUnit.SECONDS))
+            assertFailsWith<RemoteTransferException> {
+                DesktopOperations(root.resolve("sender-profile")).apply { begin() }.send(
+                    sender, null, TransferTarget(Route.LOCAL, host = "127.0.0.1", port = port), {}, { _, _ -> })
+            }
+            assertTrue(incoming.get(5, TimeUnit.SECONDS).exceptionOrNull() is TransferRejectedException)
+            assertEquals(null, receiver.current())
+        } finally { executor.shutdownNow() }
+    }
+
+    @Test
+    fun `received version can be forwarded from B to C with player files intact`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        Files.writeString(source.resolve("level.dat"), "world")
+        val playerA = "123e4567-e89b-12d3-a456-426614174000"
+        val playerB = "123e4567-e89b-12d3-a456-426614174001"
+        val playerData = Files.createDirectory(source.resolve("playerdata"))
+        Files.writeString(playerData.resolve("$playerA.dat"), "A inventory")
+        Files.writeString(playerData.resolve("$playerB.dat"), "B inventory")
+        val a = WorldRepository(root.resolve("A"))
+        val b = WorldRepository(root.resolve("B"))
+        val c = WorldRepository(root.resolve("C"))
+        val sender = DesktopOperations(root.resolve("sender-profile"))
+        val receiver = DesktopOperations(root.resolve("receiver-profile"))
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            fun forward(from: WorldRepository, to: WorldRepository, sourcePath: Path?) {
+                val port = ServerSocket(0).use { it.localPort }
+                val waiting = CountDownLatch(1)
+                receiver.begin()
+                val incoming = executor.submit<WorldTransferStats> {
+                    receiver.receive(to, TransferTarget(Route.LOCAL, port = port),
+                        { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> })
+                }
+                assertTrue(waiting.await(5, TimeUnit.SECONDS))
+                sender.begin()
+                sender.send(from, sourcePath, TransferTarget(Route.LOCAL, host = "127.0.0.1", port = port),
+                    {}, { _, _ -> })
+                incoming.get(5, TimeUnit.SECONDS)
+            }
+            forward(a, b, source)
+            forward(b, c, null)
+            assertEquals(a.current()!!.worldId, c.current()!!.worldId)
+            assertEquals(a.current()!!.versionId, b.current()!!.versionId)
+            assertEquals(b.current()!!.versionId, c.current()!!.versionId)
+            for (player in listOf(playerA, playerB)) {
+                assertTrue(Files.readAllBytes(a.workingDirectory.resolve("playerdata/$player.dat")).contentEquals(
+                    Files.readAllBytes(c.workingDirectory.resolve("playerdata/$player.dat"))))
+            }
         } finally { executor.shutdownNow() }
     }
 

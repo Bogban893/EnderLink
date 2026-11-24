@@ -1,6 +1,9 @@
 package org.enderlink.worldtransfer
 
 import org.enderlink.network.connection.Connection
+import org.enderlink.network.RemoteTransferException
+import org.enderlink.network.TransferFailureKind
+import org.enderlink.network.TransferRejectedException
 import org.enderlink.network.connection.Endpoint
 import org.enderlink.network.tcp.TcpConnection
 import org.enderlink.network.tcp.TcpListener
@@ -39,12 +42,13 @@ class WorldTransferTest {
     private fun exchange(
         sender: WorldRepository, receiver: WorldRepository, dropAfterData: Int? = null,
         onReceiverSend: (ByteArray) -> Unit = {},
+        onSenderSend: (ByteArray) -> Unit = {}, readTimeoutMs: Int = 5_000,
     ): WorldTransferStats {
         TcpListener.open(0, "127.0.0.1").use { listener ->
             TcpConnection.connect(Endpoint("127.0.0.1", listener.port)).use { client ->
                 listener.accept(2_000).use { server ->
-                    client.readTimeoutMs = 5_000
-                    server.readTimeoutMs = 5_000
+                    client.readTimeoutMs = readTimeoutMs
+                    server.readTimeoutMs = readTimeoutMs
                     val executor = Executors.newSingleThreadExecutor()
                     try {
                         val receiving = executor.submit<WorldTransferStats> {
@@ -61,6 +65,7 @@ class WorldTransferTest {
                         var dataCount = 0
                         val outgoing = object : Connection by client {
                             override fun send(payload: ByteArray) {
+                                onSenderSend(payload)
                                 if (payload.size > 5 && payload[4].toInt() == WorldTransferProtocol.DATA) {
                                     dataCount++
                                     if (dataCount == dropAfterData) {
@@ -81,6 +86,61 @@ class WorldTransferTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `receiver rejection is sent before version or objects are stored`() {
+        val (sender, receiver) = repositories()
+        val manifest = sender.current()!!
+        TcpListener.open(0, "127.0.0.1").use { listener ->
+            TcpConnection.connect(Endpoint("127.0.0.1", listener.port)).use { client ->
+                listener.accept(2_000).use { server ->
+                    client.readTimeoutMs = 5_000
+                    server.readTimeoutMs = 5_000
+                    val executor = Executors.newSingleThreadExecutor()
+                    try {
+                        val incoming = executor.submit<Throwable?> {
+                            runCatching { WorldTransfer.receive(receiver, server, approve = {
+                                assertEquals(manifest.versionId, it.versionId)
+                                false
+                            }) }.exceptionOrNull()
+                        }
+                        val rejected = assertFailsWith<RemoteTransferException> { WorldTransfer.send(sender, client) }
+                        assertEquals(TransferFailureKind.REMOTE_FAILURE, rejected.remoteKind)
+                        assertTrue(incoming.get(5, TimeUnit.SECONDS) is TransferRejectedException)
+                        assertEquals(null, receiver.current())
+                        assertFailsWith<IOException> { receiver.load(manifest.versionId) }
+                        assertTrue(manifest.objects().none(receiver::hasObject))
+                    } finally { executor.shutdownNow() }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `ожидание готовности имеет отдельный этап и таймаут`() {
+        val (sender, receiver) = repositories()
+        TcpListener.open(0, "127.0.0.1").use { listener ->
+            TcpConnection.connect(Endpoint("127.0.0.1", listener.port)).use { client ->
+                listener.accept(2_000).use {
+                    client.readTimeoutMs = 100
+                    val error = assertFailsWith<WorldTransferTimeoutException> { WorldTransfer.send(sender, client) }
+                    assertEquals(WorldTransferPhase.READINESS, error.phase)
+                    assertEquals(null, receiver.current())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `медленная передача не ограничена общим временем`() {
+        val (sender, receiver) = repositories()
+        val started = System.nanoTime()
+        exchange(sender, receiver, onSenderSend = { frame ->
+            if (frame.size > 5 && frame[4].toInt() == WorldTransferProtocol.DATA) Thread.sleep(200)
+        }, readTimeoutMs = 500)
+        assertTrue((System.nanoTime() - started) / 1_000_000 > 500)
+        assertEquals(sender.current()!!.versionId, receiver.current()!!.versionId)
     }
 
     @Test

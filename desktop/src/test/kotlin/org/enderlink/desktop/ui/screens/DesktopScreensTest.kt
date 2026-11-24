@@ -18,11 +18,14 @@ class DesktopScreensTest {
         val calls = mutableListOf<String>()
         var chosenField: JTextField? = null
         val choose: (JTextField) -> Unit = { chosenField = it }
-        val home = HomeScreen({ calls += it }, { calls += "refresh" }, { calls += "open" }, { calls += "owner" })
-        val send = SendScreen(choose, { calls += "send" }, { calls += "cancel-send" })
+        val home = HomeScreen({ calls += it }, { calls += "refresh" }, { calls += "open" }, { calls += "owner" },
+            { calls += "send-current" }, { calls += "library-$it" }, { calls += "new-world" },
+            { calls += "import-world" }, { calls += "change-library" })
+        val send = SendScreen(choose, { calls += "send" }, { calls += "cancel-send" }, { calls += "select-installed" })
         val receive = ReceiveScreen(choose, { calls += "receive" }, { calls += "cancel-receive" }, { calls += "install" })
         val server = ServerScreen(choose, choose, { calls += "start" }, { calls += "stop" })
-        val friends = FriendsScreen({ calls += "add" }, { calls += "friends" }, { calls += it })
+        val friends = FriendsScreen({ calls += "add" }, { calls += "friends" },
+            { calls += "coordinator" }, { calls += it })
         assertTrue(calls.isEmpty())
         assertFalse(friends.ownId.isEditable)
 
@@ -31,9 +34,16 @@ class DesktopScreensTest {
         home.panel.click(messages.text("action.refresh"))
         home.panel.click(messages.text("action.openWorld"))
         home.panel.click(messages.text("action.importOwner"))
+        home.sendCurrentButton.doClick(0)
+        home.libraryWorlds.addItem("World")
+        home.panel.click(messages.text("action.openLibraryWorld"))
+        home.panel.click(messages.text("action.newWorld"))
+        home.panel.click(messages.text("action.importWorld"))
+        home.panel.click(messages.text("action.changeLibraryRoot"))
         send.panel.click(messages.text("action.select"))
         assertSame(send.sourceField, chosenField)
-        send.actionButtons.single().doClick(0)
+        send.panel.click(messages.text("action.selectInstalled"))
+        send.panel.click(messages.text("action.sendWorld"))
         send.cancelButtons.single().doClick(0)
         receive.panel.click(messages.text("action.select"))
         assertSame(receive.savesField, chosenField)
@@ -45,7 +55,7 @@ class DesktopScreensTest {
         friends.panel.click(messages.text("action.addFriend"))
         friends.panel.click(messages.text("action.refreshFriends"))
 
-        assertEquals(listOf("send", "receive", "refresh", "open", "owner", "send", "cancel-send",
+        assertEquals(listOf("send", "receive", "refresh", "open", "owner", "send-current", "library-0", "new-world", "import-world", "change-library", "select-installed", "send", "cancel-send",
             "receive", "cancel-receive", "install", "start", "stop", "add", "friends"), calls)
     }
 

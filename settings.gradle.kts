@@ -4,6 +4,7 @@ plugins {
 rootProject.name = "EnderLink"
 include("core")
 include("agent")
+include("coordinator")
 include("cli")
 include("desktop")
 include("connectivity-test")

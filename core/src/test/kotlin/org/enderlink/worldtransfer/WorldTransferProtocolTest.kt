@@ -1,6 +1,9 @@
 package org.enderlink.worldtransfer
 
 import org.enderlink.network.connection.Connection
+import org.enderlink.network.IncompatibleTransferProtocolException
+import org.enderlink.network.RemoteTransferException
+import org.enderlink.network.TransferFailureKind
 import org.enderlink.network.protocol.FrameCodec
 import org.enderlink.world.WorldBlock
 import org.enderlink.world.WorldEntry
@@ -11,8 +14,35 @@ import kotlin.test.assertEquals
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
 import java.io.IOException
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.nio.file.AccessDeniedException
 
 class WorldTransferProtocolTest {
+    @Test
+    fun `receiver error includes an optional compatible failure code`() {
+        val frames = ArrayDeque<ByteArray>()
+        val connection = object : Connection {
+            override fun send(payload: ByteArray) { frames.addLast(payload) }
+            override fun receive(): ByteArray? = frames.removeFirstOrNull()
+            override fun close() {}
+        }
+        WorldTransferProtocol.sendError(connection, AccessDeniedException("world"))
+        val coded = assertFailsWith<RemoteTransferException> { WorldTransferProtocol.read(connection) }
+        assertEquals(TransferFailureKind.LOCAL_STORAGE, coded.remoteKind)
+
+        val oldBody = ByteArrayOutputStream().also { body ->
+            DataOutputStream(body).use { it.writeUTF("old recipient error") }
+        }.toByteArray()
+        WorldTransferProtocol.send(connection, WorldTransferProtocol.ERROR, oldBody)
+        val legacy = assertFailsWith<RemoteTransferException> { WorldTransferProtocol.read(connection) }
+        assertEquals(null, legacy.remoteKind)
+        assertEquals("Получатель: old recipient error", legacy.message)
+
+        connection.send(byteArrayOf(0, 0, 0, 0, 1))
+        assertFailsWith<IncompatibleTransferProtocolException> { WorldTransferProtocol.read(connection) }
+    }
+
     @Test
     fun `parent fingerprint matches previous version without session lock`() {
         val worldId = WorldManifest.newWorldId()

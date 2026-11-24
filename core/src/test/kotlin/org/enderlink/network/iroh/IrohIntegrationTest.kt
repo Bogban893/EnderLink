@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.enderlink.network.connection.Connection
+import org.enderlink.network.discovery.DiscoveryRecord
 import org.enderlink.transfer.TransferReceiver
 import org.enderlink.transfer.resume.ResumableDirectorySender
 import org.enderlink.transfer.resume.ResumableFileSender
@@ -73,6 +74,40 @@ class IrohIntegrationTest {
 
             assertEquals("Получатель подтвердил файл", result)
             assertTrue(logs.any { it.contains("Предупреждение: iroh не завершил остановку узла") })
+        }
+    }
+
+    @Test
+    fun `адрес координатора подключает к проверенному ID друга`() {
+        IrohProfile.open(root.resolve("address-server")).use { serverProfile ->
+            IrohProfile.open(root.resolve("address-client")).use { clientProfile ->
+                serverProfile.add("client", clientProfile.id)
+                clientProfile.add("server", serverProfile.id)
+                val server = runBlocking { Endpoint.bind(EndpointOptions(preset = presetMinimal(),
+                    secretKey = serverProfile.key, alpns = listOf(IROH_ALPN))) }
+                val client = runBlocking { Endpoint.bind(EndpointOptions(preset = presetMinimal(),
+                    secretKey = clientProfile.key, alpns = listOf(IROH_ALPN))) }
+                IrohNode(server, serverProfile, {}).use { receiving ->
+                    IrohNode(client, clientProfile, {}).use { sending ->
+                        val address = server.addr().use { it.directAddresses() }
+                        assertTrue(address.isNotEmpty())
+                        val record = DiscoveryRecord(serverProfile.id, null, address,
+                            emptySet(), true, System.currentTimeMillis())
+                        val executor = Executors.newSingleThreadExecutor()
+                        try {
+                            val incoming = executor.submit<IrohConnection> {
+                                receiving.accept(IrohPurpose.DIAGNOSTIC, "client")
+                            }
+                            sending.connect("server", IrohPurpose.DIAGNOSTIC, known = record).use { outgoing ->
+                                incoming.get(10, TimeUnit.SECONDS).use { accepted ->
+                                    assertEquals(serverProfile.id, outgoing.remoteId)
+                                    assertEquals(clientProfile.id, accepted.remoteId)
+                                }
+                            }
+                        } finally { executor.shutdownNow() }
+                    }
+                }
+            }
         }
     }
 

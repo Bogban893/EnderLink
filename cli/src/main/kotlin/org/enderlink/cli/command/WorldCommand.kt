@@ -87,7 +87,7 @@ class WorldCommand(
                 report("Ожидание мира. Хранилище: ${repository.workingDirectory.parent}")
                 try {
                     withConnection(options, IrohPurpose.TRANSFER, report = report, control = control) { connection ->
-                        val stats = WorldTransfer.receive(repository, connection, progress::update, ::reportPhase)
+                        val stats = WorldTransfer.receive(repository, connection, progress::update, phase = ::reportPhase)
                         report("Версия ${stats.versionId} активирована: ${repository.workingDirectory}. Получено ${stats.transferredBytes} байт, использовано повторно ${stats.reusedBytes} байт.")
                         report("Сеть ← отправитель: ${stats.wireReceivedBytes} байт; → ответы: ${stats.wireSentBytes} байт.")
                     }
@@ -104,6 +104,7 @@ class WorldCommand(
         if (phase == WorldTransferPhase.ACTIVATION) control.protectCommit() else control.checkCancelled()
         val name = when (phase) {
             WorldTransferPhase.MANIFEST -> "проверка описания мира"
+            WorldTransferPhase.READINESS -> "ожидание готовности получателя"
             WorldTransferPhase.OBJECTS -> "поиск и передача недостающих блоков"
             WorldTransferPhase.ACTIVATION -> "сборка и активация версии"
             WorldTransferPhase.CONFIRMATION -> "ожидание подтверждения получателя"

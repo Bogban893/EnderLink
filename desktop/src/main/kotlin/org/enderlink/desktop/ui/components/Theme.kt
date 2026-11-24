@@ -25,18 +25,18 @@ import javax.swing.plaf.basic.BasicScrollBarUI
 import javax.swing.plaf.basic.BasicComboBoxUI
 
 internal object C {
-    val background = Color(16, 24, 25)
-    val panel = Color(29, 39, 39)
-    val panelLight = Color(38, 50, 47)
-    val sidebar = Color(20, 31, 31)
-    val border = Color(65, 83, 73)
-    val text = Color(243, 241, 220)
-    val muted = Color(161, 178, 164)
-    val green = Color(132, 190, 96)
-    val greenDark = Color(63, 113, 65)
-    val gold = Color(239, 191, 94)
-    val red = Color(226, 121, 108)
-    val input = Color(18, 28, 29)
+    val background = Color(17, 15, 25)
+    val panel = Color(33, 28, 45)
+    val panelLight = Color(48, 39, 62)
+    val sidebar = Color(24, 20, 34)
+    val border = Color(89, 73, 106)
+    val text = Color(246, 242, 250)
+    val muted = Color(195, 184, 207)
+    val green = Color(153, 231, 184)
+    val greenDark = Color(57, 99, 85)
+    val gold = Color(240, 204, 126)
+    val red = Color(255, 157, 157)
+    val input = Color(22, 18, 31)
 }
 
 internal fun font(size: Int, bold: Boolean = false): Font = Font(
@@ -75,6 +75,10 @@ internal fun <T> combo(values: Array<T>): JComboBox<T> = JComboBox(values).apply
     preferredSize = Dimension(200, 42)
     maximumSize = Dimension(Int.MAX_VALUE, 42)
     border = BorderFactory.createLineBorder(C.border)
+    addFocusListener(object : FocusAdapter() {
+        override fun focusGained(e: FocusEvent) { border = BorderFactory.createLineBorder(C.gold, UiScale.px(2)) }
+        override fun focusLost(e: FocusEvent) { border = BorderFactory.createLineBorder(C.border) }
+    })
     renderer = object : DefaultListCellRenderer() {
         override fun getListCellRendererComponent(
             list: javax.swing.JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean,
@@ -118,10 +122,16 @@ internal class BlockButton(text: String, private val primary: Boolean = false) :
     override fun paintComponent(graphics: Graphics) {
         val g = graphics.create() as Graphics2D
         val active = isEnabled
+        foreground = when {
+            !active -> C.muted
+            primary && model.isPressed -> C.text
+            primary -> C.background
+            else -> C.text
+        }
         val bg = when {
-            !active -> C.border
+            !active -> C.panel
             model.isPressed -> if (primary) C.greenDark else C.input
-            model.isRollover -> if (primary) Color(156, 210, 116) else C.panelLight
+            model.isRollover -> if (primary) Color(185, 244, 206) else Color(69, 56, 88)
             primary -> C.green
             else -> C.panelLight
         }
@@ -129,10 +139,15 @@ internal class BlockButton(text: String, private val primary: Boolean = false) :
         g.fillRect(2, 4, width - 4, height - 4)
         g.color = bg
         g.fillRect(0, 0, width - 2, height - 4)
-        g.color = if (primary) Color(193, 232, 148) else C.border
+        g.color = if (primary) Color(208, 255, 222) else C.border
         g.fillRect(0, 0, width - 2, 2)
         g.color = if (primary) C.greenDark else C.input
         g.fillRect(0, height - 6, width - 2, 2)
+        if (hasFocus()) {
+            g.color = C.gold
+            g.stroke = BasicStroke(UiScale.px(2).toFloat())
+            g.drawRect(1, 1, width - 5, height - 7)
+        }
         g.dispose()
         super.paintComponent(graphics)
     }
@@ -153,7 +168,7 @@ internal class Surface(private val fill: Color = C.panel) : JPanel() {
         g.fillRect(0, 0, width - 5, height - 5)
         g.color = C.border
         g.drawRect(0, 0, width - 6, height - 6)
-        g.color = Color(92, 117, 92)
+        g.color = C.greenDark
         g.fillRect(1, 1, width - 7, 2)
         g.dispose()
         super.paintComponent(graphics)
@@ -172,43 +187,34 @@ internal class PixelScene : JComponent() {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
         g.scale(UiScale.factor.toDouble(), UiScale.factor.toDouble())
         val w = (width / UiScale.factor).toInt(); val h = (height / UiScale.factor).toInt()
-        g.color = Color(48, 91, 97); g.fillRect(0, 0, w, h)
-        g.color = Color(76, 129, 135); g.fillRect(0, 20, w, h - 20)
-        g.color = Color(102, 153, 151); g.fillRect(0, 62, w, h - 62)
-        // Distant square clouds and blocky mountain silhouettes.
-        g.color = Color(175, 199, 177)
-        for ((x, y) in listOf(32 to 30, 250 to 23, 500 to 50, 740 to 24)) {
-            g.fillRect(x, y + 8, 88, 12); g.fillRect(x + 14, y, 53, 12)
+        if (w <= 0 || h <= 0) { g.dispose(); return }
+        g.color = Color(25, 18, 40); g.fillRect(0, 0, w, h)
+        g.color = Color(35, 25, 55); g.fillRect(0, 72, w, h - 72)
+        g.color = Color(47, 32, 68); g.fillRect(0, 121, w, h - 121)
+        for (i in 0..34) {
+            val x = ((i * 83L + 29) % w).toInt()
+            val y = ((i * 41L + 11) % 132).toInt()
+            g.color = if (i % 5 == 0) C.green else Color(140, 110, 176)
+            g.fillRect(x, y, if (i % 4 == 0) 3 else 2, 2)
         }
-        g.color = Color(76, 116, 109)
-        for (x in 0..w step 22) {
-            val rise = ((x * 17L + 43) % 53).toInt()
-            g.fillRect(x, 112 - rise / 2, 24, h)
+        // Obsidian towers and floating End stone islands stay on the right of the heading.
+        val px = (w * 0.77).toInt().coerceAtLeast(360)
+        g.color = Color(20, 17, 31); g.fillRect(px + 85, 57, 31, 111)
+        g.color = Color(69, 49, 86); g.fillRect(px + 89, 57, 4, 111)
+        g.color = Color(20, 17, 31); g.fillRect(px - 98, 94, 19, 74)
+        g.color = Color(69, 49, 86); g.fillRect(px - 95, 94, 3, 74)
+        g.color = Color(34, 28, 43); g.fillRect(px - 116, 151, 251, 19)
+        g.color = Color(135, 127, 119); g.fillRect(px - 125, 145, 269, 7)
+        g.color = Color(170, 158, 138); g.fillRect(px - 105, 141, 225, 4)
+        g.color = Color(21, 17, 33); g.fillRect(px - 33, 41, 79, 101)
+        g.color = Color(105, 75, 132); g.fillRect(px - 29, 45, 71, 93)
+        g.color = Color(36, 24, 54); g.fillRect(px - 22, 52, 57, 79)
+        for (i in 0..12) {
+            g.color = if (i % 3 == 0) C.green else Color(143, 94, 190)
+            g.fillRect(px - 16 + (i * 31 % 47), 57 + (i * 37 % 68), 3, 3)
         }
-        g.color = Color(45, 88, 74)
-        for (x in 0..w step 32) {
-            val rise = ((x * 11L + 23) % 50).toInt()
-            g.fillRect(x, 134 - rise / 3, 34, h)
-        }
-        // A small End portal. It is geometric so it remains crisp at any scale.
-        val px = (w * 0.76).toInt().coerceAtLeast(300)
-        g.color = Color(21, 27, 33); g.fillRect(px - 32, 44, 116, 109)
-        g.color = Color(101, 80, 116); g.fillRect(px - 26, 50, 104, 97)
-        g.color = Color(45, 28, 59); g.fillRect(px - 18, 57, 88, 85)
-        g.color = Color(118, 77, 151)
-        for (i in 0..11) {
-            val x = px - 14 + ((i * 37) % 81)
-            val y = 62 + ((i * 43) % 74)
-            g.fillRect(x, y, if (i % 3 == 0) 5 else 3, 3)
-        }
-        g.color = Color(37, 55, 49); g.fillRect(px - 42, 148, 136, 10)
-        g.color = Color(60, 125, 66); g.fillRect(0, h - 34, w, 12)
-        g.color = Color(96, 159, 70); g.fillRect(0, h - 36, w, 5)
-        g.color = Color(95, 71, 51); g.fillRect(0, h - 22, w, 22)
-        for (x in 0..w step 36) {
-            g.color = if ((x / 36) % 2 == 0) Color(113, 84, 55) else Color(70, 58, 47)
-            g.fillRect(x + 8, h - 15, 9, 5)
-        }
+        g.color = C.greenDark; g.fillRect(px - 40, 141, 94, 4)
+        g.color = Color(17, 15, 25); g.fillRect(0, h - 12, w, 12)
         g.color = C.text
         g.font = Font("Dialog", Font.BOLD, 26)
         g.drawString(messages.text("brand.sceneTitle"), 28, 86)
@@ -248,6 +254,33 @@ internal class TransferBar : JProgressBar(0, 1000) {
         border = BorderFactory.createLineBorder(C.border)
         preferredSize = Dimension(300, 12)
         maximumSize = Dimension(Int.MAX_VALUE, 12)
+    }
+
+    fun waiting() {
+        value = 0
+        isIndeterminate = true
+        foreground = C.gold
+        getAccessibleContext().accessibleDescription = messages.text("status.preparing")
+    }
+
+    fun transferring(value: Int) {
+        isIndeterminate = false
+        foreground = C.green
+        this.value = value
+        getAccessibleContext().accessibleDescription = "${value / 10}%"
+    }
+
+    fun succeeded() {
+        isIndeterminate = false
+        foreground = C.green
+        value = maximum
+        getAccessibleContext().accessibleDescription = "100%"
+    }
+
+    fun failed() {
+        isIndeterminate = false
+        foreground = C.red
+        getAccessibleContext().accessibleDescription = messages.text("status.errorShort")
     }
 }
 

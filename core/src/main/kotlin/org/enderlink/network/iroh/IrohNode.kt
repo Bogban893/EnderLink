@@ -8,9 +8,13 @@ import computer.iroh.PathChangeCallback
 import computer.iroh.PathSnapshot
 import computer.iroh.presetN0
 import computer.iroh.setLogLevel
+import org.enderlink.network.discovery.DiscoveryRecord
+import org.enderlink.network.IncompatibleTransferProtocolException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 internal val IROH_ALPN = "enderlink/connection/1".toByteArray(Charsets.US_ASCII)
@@ -23,16 +27,23 @@ class IrohNode internal constructor(
     private val log: (String) -> Unit,
     private val shutdownEndpoint: suspend (Endpoint) -> Unit = { it.shutdown() },
 ) : AutoCloseable {
-    fun connect(friend: String, purpose: IrohPurpose = IrohPurpose.CHAT, relay: String? = null): IrohConnection = blocking {
+    fun connect(friend: String, purpose: IrohPurpose = IrohPurpose.CHAT, relay: String? = null,
+                known: DiscoveryRecord? = null): IrohConnection = blocking {
         if (relay != null) validateRelay(relay)
         val target = profile.friendId(friend)
         log("Подключение к $friend; ID друга: $target")
-        prepare(dialFriend(endpoint, profile, target, relay, log), purpose, true)
+        prepare(dialFriend(endpoint, profile, target, relay, known, log), purpose, true)
     }
+
+    fun advertisedAddress(): Pair<String?, List<String>> = endpoint.addr().use { it.relayUrl() to it.directAddresses() }
 
     fun accept(purpose: IrohPurpose = IrohPurpose.CHAT, friend: String? = null, timeoutMs: Long = 0): IrohConnection = blocking {
         require(timeoutMs >= 0) { "Таймаут не может быть отрицательным" }
-        if (timeoutMs == 0L) acceptIncoming(purpose, friend) else withTimeout(timeoutMs) { acceptIncoming(purpose, friend) }
+        if (timeoutMs == 0L) acceptIncoming(purpose, friend) else try {
+            withTimeout(timeoutMs) { acceptIncoming(purpose, friend) }
+        } catch (error: TimeoutCancellationException) {
+            throw SocketTimeoutException("Истекло ожидание входящего подключения iroh").apply { initCause(error) }
+        }
     }
 
     private suspend fun acceptIncoming(purpose: IrohPurpose, friend: String?): IrohConnection {
@@ -79,11 +90,11 @@ class IrohNode internal constructor(
                 val hello = "ELIROH2:${purpose.name}".toByteArray(Charsets.US_ASCII)
                 if (initiator) {
                     connection.send(hello)
-                    if (connection.receive()?.contentEquals(hello) != true) throw IOException("Режимы подключения участников не совпадают")
+                    if (connection.receive()?.contentEquals(hello) != true) throw IncompatibleTransferProtocolException("Режимы подключения участников не совпадают")
                 } else {
                     if (connection.receive()?.contentEquals(hello) != true) {
                         connection.send("Режимы подключения участников не совпадают".toByteArray())
-                        throw IOException("Ожидался режим $purpose, собеседник выбрал другой режим")
+                        throw IncompatibleTransferProtocolException("Ожидался режим $purpose, собеседник выбрал другой режим")
                     }
                     connection.send(hello)
                 }

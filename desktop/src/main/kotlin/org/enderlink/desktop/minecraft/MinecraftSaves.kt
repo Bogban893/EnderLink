@@ -21,11 +21,15 @@ import java.nio.file.StandardOpenOption.READ
 import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.Properties
+import java.util.UUID
 
 data class MinecraftInstallResult(val directory: Path, val versionId: String, val replacedFiles: Int, val reusedFiles: Int)
+enum class ManagedSaveState { UNCHANGED, CHANGED, OPEN }
+data class ManagedMinecraftSave(val directory: Path, val state: ManagedSaveState)
 
 /** Installs a verified EnderLink version as an ordinary Minecraft Java save. */
 object MinecraftSaves {
+    private data class InstalledMarker(val manifest: WorldManifest, val contentHash: String? = null, val owner: UUID? = null)
     fun defaultDirectory(): Path {
         val home = Path.of(System.getProperty("user.home"))
         val os = System.getProperty("os.name").lowercase()
@@ -34,6 +38,54 @@ object MinecraftSaves {
                 ?: home.resolve("AppData/Roaming/.minecraft/saves")
             "mac" in os -> home.resolve("Library/Application Support/minecraft/saves")
             else -> home.resolve(".minecraft/saves")
+        }
+    }
+
+    /** Checks Minecraft's session lock before reading a save for publication. */
+    fun requireClosed(world: Path) {
+        val lockPath = world.resolve("session.lock")
+        if (!Files.exists(lockPath, NOFOLLOW_LINKS)) return
+        if (!Files.isRegularFile(lockPath, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.lockSymlink"))
+        FileChannel.open(lockPath, READ, WRITE).use { channel ->
+            val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                ?: throw IOException(messages.text("minecraft.openBeforeReceive"))
+            lock.use { }
+        }
+    }
+
+    /** Reads tracked saves for the active world without changing them. Call off the Swing event thread. */
+    fun inspectManaged(repository: WorldRepository, savesDirectory: Path): List<ManagedMinecraftSave> {
+        val current = repository.current() ?: return emptyList()
+        val saves = savesDirectory.toAbsolutePath().normalize()
+        val repositoryRoot = repository.workingDirectory.parent
+        if (saves.startsWith(repositoryRoot) || repositoryRoot.startsWith(saves)) {
+            throw IOException(messages.text("minecraft.repositoryOverlap"))
+        }
+        if (Files.isSymbolicLink(saves)) throw IOException(messages.text("minecraft.savesSymlink"))
+        val metadata = saves.resolve(".enderlink-sync")
+        if (!Files.exists(metadata, NOFOLLOW_LINKS)) return emptyList()
+        if (!Files.isDirectory(metadata, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.metadataSymlink"))
+        return Files.list(metadata).use { paths ->
+            paths.filter { it.fileName.toString().endsWith(".properties") }.map { marker ->
+                if (!Files.isRegularFile(marker, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidMarkerPath", marker))
+                val properties = Properties().apply { Files.newInputStream(marker).use(::load) }
+                if (properties.getProperty("worldId") != current.worldId) return@map null
+                val installed = readMarker(repository, marker)
+                val name = marker.fileName.toString().removeSuffix(".properties")
+                validateName(name)
+                val target = saves.resolve(name)
+                val lockPath = target.resolve("session.lock")
+                val state = when {
+                    !Files.isDirectory(target, NOFOLLOW_LINKS) || Files.isSymbolicLink(target) -> ManagedSaveState.CHANGED
+                    !Files.isRegularFile(lockPath, NOFOLLOW_LINKS) -> ManagedSaveState.CHANGED
+                    else -> FileChannel.open(lockPath, READ, WRITE).use { channel ->
+                        val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                        if (lock == null) ManagedSaveState.OPEN
+                        else lock.use { if (matches(target, installed)) ManagedSaveState.UNCHANGED else ManagedSaveState.CHANGED }
+                    }
+                }
+                ManagedMinecraftSave(target, state)
+            }.filter { it != null }.map { requireNotNull(it) }.toList()
         }
     }
 
@@ -61,6 +113,7 @@ object MinecraftSaves {
     fun install(
         repository: WorldRepository, savesDirectory: Path, folderName: String,
         parentFingerprint: ParentFingerprint? = null,
+        owner: UUID? = null,
     ): MinecraftInstallResult {
         validateName(folderName)
         repository.verifyCurrent()
@@ -89,12 +142,13 @@ object MinecraftSaves {
                     throw IOException(messages.text("minecraft.targetOccupied", target))
                 }
                 val previous = findPrevious(repository, target, marker, incoming, parentFingerprint)
-                val oldEntries = previous?.entries.orEmpty().filterNot(::isSessionLock).associateBy { it.path }
+                val oldEntries = previous?.manifest?.entries.orEmpty().filterNot(::isSessionLock).associateBy { it.path }
                 val newEntries = incoming.entries.filterNot(::isSessionLock)
-                val replaced = newEntries.count { oldEntries[it.path] != it }
+                val changedFiles = newEntries.count { oldEntries[it.path] != it }
+                val replaced = if (previous != null && previous.owner != owner && owner != null) maxOf(changedFiles, 1) else changedFiles
                 val reused = newEntries.count { oldEntries[it.path] == it }
-                if (previous?.versionId == incoming.versionId) {
-                    writeMarker(marker, incoming)
+                if (previous?.manifest?.versionId == incoming.versionId && previous.owner == owner) {
+                    writeMarker(marker, previous)
                     return MinecraftInstallResult(target, incoming.versionId, 0, reused)
                 }
                 if (Files.exists(stage, NOFOLLOW_LINKS)) deleteTree(stage)
@@ -103,12 +157,18 @@ object MinecraftSaves {
                     deleteTree(stage)
                     throw IOException(messages.text("minecraft.copyChanged"))
                 }
+                val playerData = org.enderlink.world.PlayerDataInspector.inspect(stage)
+                if (owner == null && (playerData.legacyEmbeddedPlayer || playerData.singleplayerUuid)) {
+                    throw IOException(messages.text("minecraft.ownerRequired"))
+                }
+                if (owner != null) org.enderlink.world.PlayerDataInspector.prepareSingleplayerOwner(stage, owner)
+                val installed = InstalledMarker(incoming, if (owner == null) null else contentHash(stage, incoming), owner)
                 // Minecraft uses this lock while the save is open. Keep the staged lock across rename.
                 FileChannel.open(stage.resolve("session.lock"), CREATE, READ, WRITE).use { stageChannel ->
                     val stageLock = try { stageChannel.tryLock() } catch (_: OverlappingFileLockException) { null }
                         ?: throw IOException(messages.text("minecraft.stageLockFailed"))
                     stageLock.use {
-                        writeMarker(pending, incoming)
+                        writeMarker(pending, installed)
                         if (Files.exists(target, NOFOLLOW_LINKS)) {
                             if (Files.isSymbolicLink(target.resolve("session.lock"))) {
                                 throw IOException(messages.text("minecraft.lockSymlink"))
@@ -126,7 +186,7 @@ object MinecraftSaves {
                                 }
                             }
                         } else move(stage, target)
-                        writeMarker(marker, incoming)
+                        writeMarker(marker, installed)
                         Files.deleteIfExists(pending)
                     }
                 }
@@ -139,7 +199,7 @@ object MinecraftSaves {
     private fun findPrevious(
         repository: WorldRepository, target: Path, marker: Path, incoming: WorldManifest,
         parentFingerprint: ParentFingerprint?,
-    ): WorldManifest? {
+    ): InstalledMarker? {
         if (!Files.exists(target, NOFOLLOW_LINKS)) {
             if (Files.exists(marker, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.targetMissing", target))
             return null
@@ -153,15 +213,18 @@ object MinecraftSaves {
             val previous = runCatching { repository.load(savedVersion) }.getOrNull()
                 ?: matchingFingerprint(target, incoming, parentFingerprint?.takeIf { it.versionId == savedVersion })
                 ?: throw IOException(messages.text("minecraft.previousManifestMissing"))
-            if (previous.worldId != incoming.worldId || !matches(target, previous)) {
+            val installed = InstalledMarker(previous,
+                properties.getProperty("contentHash")?.also(::requireContentHash),
+                properties.getProperty("ownerUuid")?.let(UUID::fromString))
+            if (previous.worldId != incoming.worldId || !matches(target, installed)) {
                 throw IOException(messages.text("minecraft.localChanges"))
             }
-            return previous
+            return installed
         }
         // A manually copied EnderLink world can be adopted only when its bytes match a known version.
         val candidates = listOfNotNull(incoming, incoming.parentVersionId?.let { runCatching { repository.load(it) }.getOrNull() })
-        return candidates.firstOrNull { matches(target, it) }
-            ?: matchingFingerprint(target, incoming, parentFingerprint)
+        return candidates.firstOrNull { matches(target, it) }?.let { InstalledMarker(it) }
+            ?: matchingFingerprint(target, incoming, parentFingerprint)?.let { InstalledMarker(it) }
             ?: throw IOException(messages.text("minecraft.unrelatedTarget", target))
     }
 
@@ -201,12 +264,28 @@ object MinecraftSaves {
         if (Files.exists(stage, NOFOLLOW_LINKS)) deleteTree(stage)
     }
 
-    private fun readMarker(repository: WorldRepository, path: Path): WorldManifest {
+    private fun readMarker(repository: WorldRepository, path: Path): InstalledMarker {
         if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidMarkerPath", path))
         val properties = Properties().apply { Files.newInputStream(path).use(::load) }
         val manifest = repository.load(properties.getProperty("versionId") ?: throw IOException(messages.text("minecraft.markerVersionMissing", path)))
         if (manifest.worldId != properties.getProperty("worldId")) throw IOException(messages.text("minecraft.worldIdMismatch"))
-        return manifest
+        return InstalledMarker(manifest,
+            properties.getProperty("contentHash")?.also(::requireContentHash),
+            properties.getProperty("ownerUuid")?.let(UUID::fromString))
+    }
+
+    private fun matches(directory: Path, marker: InstalledMarker): Boolean =
+        if (marker.contentHash == null) matches(directory, marker.manifest)
+        else runCatching { contentHash(directory, marker.manifest) == marker.contentHash }.getOrDefault(false)
+
+    private fun contentHash(directory: Path, manifest: WorldManifest): String {
+        val scanned = WorldScanner.scan(directory, manifest.worldId, manifest.parentVersionId, manifest.formatVersion)
+        return WorldManifest.create(manifest.worldId, null,
+            scanned.entries.filterNot(::isSessionLock), manifest.formatVersion).treeHash
+    }
+
+    private fun requireContentHash(value: String) {
+        if (!value.matches(Regex("sha256:[0-9a-f]{64}"))) throw IOException(messages.text("minecraft.invalidMarker"))
     }
 
     private fun matches(directory: Path, manifest: WorldManifest): Boolean = try {
@@ -217,12 +296,14 @@ object MinecraftSaves {
 
     private fun isSessionLock(entry: WorldEntry): Boolean = entry.path == "session.lock"
 
-    private fun writeMarker(path: Path, manifest: WorldManifest) {
+    private fun writeMarker(path: Path, marker: InstalledMarker) {
         val temp = Files.createTempFile(path.parent, ".enderlink-marker-", ".tmp")
         try {
             Properties().apply {
-                setProperty("worldId", manifest.worldId)
-                setProperty("versionId", manifest.versionId)
+                setProperty("worldId", marker.manifest.worldId)
+                setProperty("versionId", marker.manifest.versionId)
+                marker.contentHash?.let { setProperty("contentHash", it) }
+                marker.owner?.let { setProperty("ownerUuid", it.toString()) }
             }.also { properties -> Files.newOutputStream(temp).use { properties.store(it, "EnderLink Minecraft save") } }
             move(temp, path, replace = true)
         } finally { Files.deleteIfExists(temp) }

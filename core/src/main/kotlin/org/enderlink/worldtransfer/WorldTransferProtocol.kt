@@ -1,6 +1,10 @@
 package org.enderlink.worldtransfer
 
 import org.enderlink.network.connection.Connection
+import org.enderlink.network.IncompatibleTransferProtocolException
+import org.enderlink.network.RemoteTransferException
+import org.enderlink.network.TransferFailureClassifier
+import org.enderlink.network.TransferFailureKind
 import org.enderlink.world.WorldEntry
 import org.enderlink.world.WorldEntryType
 import org.enderlink.world.WorldManifest
@@ -41,12 +45,17 @@ internal object WorldTransferProtocol {
 
     fun read(connection: Connection): Pair<Int, ByteArray> {
         val bytes = connection.receive() ?: throw EOFException("Соединение прервано до подтверждения версии мира")
-        if (bytes.size < 5) throw IOException("Некорректное сообщение версии мира")
+        if (bytes.size < 5) throw IncompatibleTransferProtocolException("Некорректное сообщение версии мира")
         val input = DataInputStream(ByteArrayInputStream(bytes))
-        if (input.readInt() != MAGIC) throw IOException("Ожидается передача версии мира")
+        if (input.readInt() != MAGIC) throw IncompatibleTransferProtocolException("Ожидается протокол ELW4 для передачи мира")
         val type = input.readUnsignedByte()
         val body = input.readBytes()
-        if (type == ERROR) throw IOException("Получатель: ${DataInputStream(ByteArrayInputStream(body)).readUTF()}")
+        if (type == ERROR) {
+            val failure = DataInputStream(ByteArrayInputStream(body))
+            val reason = failure.readUTF()
+            val kind = if (failure.available() > 0) runCatching { TransferFailureKind.valueOf(failure.readUTF()) }.getOrNull() else null
+            throw RemoteTransferException("Получатель: $reason", kind)
+        }
         return type to body
     }
 
@@ -78,7 +87,10 @@ internal object WorldTransferProtocol {
     fun sendError(connection: Connection, error: Throwable) {
         runCatching {
             val bytes = ByteArrayOutputStream()
-            DataOutputStream(bytes).use { it.writeUTF((error.message ?: "Ошибка передачи мира").take(1000)) }
+            DataOutputStream(bytes).use {
+                it.writeUTF((error.message ?: "Ошибка передачи мира").take(1000))
+                it.writeUTF(TransferFailureClassifier.classify(error).name)
+            }
             send(connection, ERROR, bytes.toByteArray())
         }
     }

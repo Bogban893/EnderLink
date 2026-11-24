@@ -1,5 +1,6 @@
 package org.enderlink.desktop.i18n
 
+import org.enderlink.network.TransferFailureKind
 import java.text.MessageFormat
 import java.text.NumberFormat
 import java.util.Locale
@@ -56,6 +57,21 @@ class MessagesTest {
             en.text("conflict.confirmIncoming", "incoming", "local"))
         assertEquals("Error: Minecraft's {world}", en.text("status.error", "Minecraft's {world}"))
         assertFailsWith<MissingResourceException> { en.text("missing.key") }
+    }
+
+    @Test
+    fun `network failure messages give a next step in both languages`() {
+        val ru = Messages(Locale.forLanguageTag("ru"))
+        val en = Messages(Locale.ENGLISH)
+        for (kind in TransferFailureKind.entries) {
+            assertTrue(ru.text("network.error.${kind.name.lowercase()}").isNotBlank())
+            assertTrue(en.text("network.error.${kind.name.lowercase()}").isNotBlank())
+        }
+        assertTrue(ru.text("network.error.connection_refused").contains("Ждать мир"))
+        assertTrue(en.text("network.error.connection_refused").contains("Wait for world"))
+        assertTrue(ru.text("network.error.no_response").contains("неизвестно"))
+        assertTrue(en.text("network.error.no_response").contains("unknown"))
+        assertTrue(ru.text("network.error.dialog", "Подсказка", "operation-id").contains("operation-id"))
     }
 
     private fun properties(name: String): Properties = Properties().apply {
