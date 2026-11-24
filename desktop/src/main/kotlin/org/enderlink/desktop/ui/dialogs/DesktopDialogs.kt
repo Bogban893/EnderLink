@@ -1,14 +1,17 @@
 package org.enderlink.desktop.ui.dialogs
 
+import com.formdev.flatlaf.util.SystemFileChooser
+import com.formdev.flatlaf.util.SystemFileChooser.FileNameExtensionFilter
 import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.shortId
 import java.awt.Component
 import java.nio.file.Path
-import javax.swing.JFileChooser
 import javax.swing.JOptionPane
-import javax.swing.filechooser.FileNameExtensionFilter
 
-internal class DesktopDialogs(private val parent: Component) {
+internal class DesktopDialogs(
+    private val parent: Component,
+    private val createFileChooser: () -> SystemFileChooser = { SystemFileChooser() },
+) {
     fun warning(text: String) {
         JOptionPane.showMessageDialog(parent, text, messages.text("app.name"), JOptionPane.WARNING_MESSAGE)
     }
@@ -28,19 +31,19 @@ internal class DesktopDialogs(private val parent: Component) {
     ) == JOptionPane.YES_OPTION
 
     fun chooseDirectory(current: String): String? {
-        val chooser = JFileChooser().apply {
-            fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+        val chooser = createFileChooser().apply {
+            fileSelectionMode = SystemFileChooser.DIRECTORIES_ONLY
             current.takeIf(String::isNotBlank)?.let { raw ->
                 runCatching { Path.of(raw).toFile() }.getOrNull()?.let { currentDirectory = it }
             }
         }
-        return if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
+        return if (chooser.showOpenDialog(parent) == SystemFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
     }
 
     fun chooseJar(): String? {
-        val chooser = JFileChooser().apply {
+        val chooser = createFileChooser().apply {
             fileFilter = FileNameExtensionFilter(messages.text("fileChooser.jarFilter"), "jar")
         }
-        return if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
+        return if (chooser.showOpenDialog(parent) == SystemFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
     }
 }
