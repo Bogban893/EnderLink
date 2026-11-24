@@ -19,20 +19,20 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.swing.JButton
-import javax.swing.JFileChooser
 import javax.swing.JFrame
 import javax.swing.JLabel
-import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.border.EmptyBorder
+import org.enderlink.desktop.settings.DesktopPreferences
+import org.enderlink.desktop.settings.DesktopSettings
+import org.enderlink.desktop.ui.dialogs.DesktopDialogs
 import org.enderlink.desktop.DesktopOperations
 import org.enderlink.desktop.MinecraftSaves
 import org.enderlink.desktop.Route
@@ -55,8 +55,8 @@ import org.enderlink.desktop.ui.screens.SendScreen
 import org.enderlink.desktop.ui.screens.ServerScreen
 
 internal class DesktopFrame : JFrame("EnderLink — миры без границ") {
-    private val settingsPath = Path.of(System.getProperty("user.home"), ".enderlink", "desktop.properties")
-    private val settings = Properties()
+    private val settings = DesktopSettings()
+    private val dialogs = DesktopDialogs(this)
     private val operations = DesktopOperations()
     private val busy = AtomicBoolean(false)
     private val cards = JPanel(CardLayout()).apply { isOpaque = false }
@@ -84,27 +84,19 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private val cancelButtons = sendScreen.cancelButtons + receiveScreen.cancelButtons
 
     init {
-        runCatching { Files.newInputStream(settingsPath).use(settings::load) }
-        repositoryField.text = settings.getProperty("repository", "")
-        receiveScreen.savesField.text = settings.getProperty("saves", MinecraftSaves.defaultDirectory().toString())
-        receiveScreen.saveNameField.text = settings.getProperty("saveName", "EnderLink World")
-        serverScreen.serverBaseField.text = settings.getProperty("serverBase", "")
-        serverScreen.jarField.text = settings.getProperty("jar", "")
-        lastParentFingerprint = runCatching {
-            ParentFingerprint(
-                settings.getProperty("parentVersion"),
-                settings.getProperty("parentFormat").toInt(),
-                settings.getProperty("parentHash"),
-            )
-        }.getOrNull()
+        val preferences = settings.load()
+        repositoryField.text = preferences.repository
+        receiveScreen.savesField.text = preferences.saves
+        receiveScreen.saveNameField.text = preferences.saveName
+        serverScreen.serverBaseField.text = preferences.serverBase
+        serverScreen.jarField.text = preferences.jar
+        lastParentFingerprint = preferences.parentFingerprint
         defaultCloseOperation = DO_NOTHING_ON_CLOSE
         addWindowListener(object : WindowAdapter() {
             override fun windowClosing(event: WindowEvent) {
                 if (busy.get()) { error("Дождитесь завершения операции или отмените передачу"); return }
                 if (server?.isRunning() == true) {
-                    val choice = JOptionPane.showConfirmDialog(this@DesktopFrame,
-                        "Сохранить мир и остановить сервер перед выходом?", "Сервер работает", JOptionPane.YES_NO_OPTION)
-                    if (choice == JOptionPane.YES_OPTION) {
+                    if (dialogs.confirmServerStop()) {
                         closeAfterServerStop = true
                         stopServer()
                     }
@@ -470,11 +462,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     private fun handleError(failure: Throwable) {
         if (failure is WorldConflictException) {
             status("Конфликт версий · входящая сохранена")
-            val choice = JOptionPane.showConfirmDialog(this,
-                "Входящая версия ${shortId(failure.incoming)} сохранена.\n" +
-                    "Активная версия ${failure.local?.let(::shortId) ?: "отсутствует"}.\n\n" +
-                    "Переключиться на входящую ветку?", "Конфликт версий", JOptionPane.YES_NO_OPTION)
-            if (choice == JOptionPane.YES_OPTION) {
+            if (dialogs.confirmIncomingVersion(failure.local, failure.incoming)) {
                 val repository = repository() ?: return
                 job("Активируем входящую версию…", { repository.checkout(failure.incoming) }) {
                     status("Входящая версия активирована. Нажмите «Обновить Minecraft» для установки.")
@@ -485,7 +473,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
         }
         val message = failure.message ?: failure.javaClass.simpleName
         status("Ошибка: $message")
-        JOptionPane.showMessageDialog(this, message, "EnderLink", JOptionPane.ERROR_MESSAGE)
+        dialogs.error(message)
     }
 
     private fun cancelOperation() {
@@ -510,7 +498,7 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
 
     private fun statusAsync(text: String) = SwingUtilities.invokeLater { status(text) }
     private fun status(text: String) { statusLine.text = text }
-    private fun error(text: String) { JOptionPane.showMessageDialog(this, text, "EnderLink", JOptionPane.WARNING_MESSAGE) }
+    private fun error(text: String) { dialogs.warning(text) }
     private fun resetProgress() {
         lastProgressNs.set(0)
         sendScreen.sendProgress.value = 0; receiveScreen.receiveProgress.value = 0
@@ -527,45 +515,25 @@ internal class DesktopFrame : JFrame("EnderLink — миры без границ
     }
 
     private fun saveSettings() {
-        settings.setProperty("repository", repositoryField.text.trim())
-        settings.setProperty("saves", receiveScreen.savesField.text.trim())
-        settings.setProperty("saveName", receiveScreen.saveNameField.text.trim())
-        lastParentFingerprint?.let {
-            settings.setProperty("parentVersion", it.versionId)
-            settings.setProperty("parentFormat", it.formatVersion.toString())
-            settings.setProperty("parentHash", it.contentHash)
-        } ?: run {
-            settings.remove("parentVersion"); settings.remove("parentFormat"); settings.remove("parentHash")
-        }
-        settings.setProperty("serverBase", serverScreen.serverBaseField.text.trim())
-        settings.setProperty("jar", serverScreen.jarField.text.trim())
-        runCatching {
-            Files.createDirectories(settingsPath.parent)
-            Files.newOutputStream(settingsPath).use { settings.store(it, "EnderLink Desktop paths") }
-        }
+        settings.save(DesktopPreferences(
+            repository = repositoryField.text,
+            saves = receiveScreen.savesField.text,
+            saveName = receiveScreen.saveNameField.text,
+            serverBase = serverScreen.serverBaseField.text,
+            jar = serverScreen.jarField.text,
+            parentFingerprint = lastParentFingerprint,
+        ))
     }
 
     private fun chooseDirectory(target: javax.swing.JTextField) {
-        JFileChooser().apply {
-            fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-            target.text.takeIf(String::isNotBlank)?.let { raw ->
-                runCatching { Path.of(raw).toFile() }.getOrNull()?.let { currentDirectory = it }
-            }
-        }.let { chooser ->
-            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                target.text = chooser.selectedFile.absolutePath
-                saveSettings()
-                if (target === repositoryField) refreshStatus()
-            }
+        dialogs.chooseDirectory(target.text)?.let {
+            target.text = it
+            saveSettings()
+            if (target === repositoryField) refreshStatus()
         }
     }
 
     private fun chooseFile(target: javax.swing.JTextField) {
-        val chooser = JFileChooser()
-        chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Java Archive (*.jar)", "jar")
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            target.text = chooser.selectedFile.absolutePath; saveSettings()
-        }
+        dialogs.chooseJar()?.let { target.text = it; saveSettings() }
     }
 }
-
