@@ -40,4 +40,3 @@ internal fun scroll(panel: JPanel): JScrollPane = JScrollPane(panel).apply {
     verticalScrollBar.preferredSize = Dimension(9, 0)
     horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
 }
-
