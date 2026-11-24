@@ -1,5 +1,7 @@
 package org.enderlink.cli
 
+import org.enderlink.cli.tui.TuiApplication
+import org.enderlink.cli.tui.TuiCommands
 import org.enderlink.cli.command.ConnectCommand
 import org.enderlink.cli.command.ListenCommand
 import org.enderlink.cli.command.SendCommand
@@ -16,6 +18,8 @@ private val profileCommands = setOf("id", "add", "friends", "remove")
 private val localWorldCommands = setOf("world-publish", "world-status", "world-checkout", "world-import-owner")
 private val commands = networkCommands + profileCommands + localWorldCommands
 private const val HELP = """EnderLink — чат, файлы и версии мира по TCP или через интернет (iroh)
+Интерактивный интерфейс:
+  tui — панели и командная строка (просмотр миров и друзей)
 TCP:
   listen [--host <адрес>] [--port <порт>]
   connect --host <адрес> [--port <порт>]
@@ -135,6 +139,16 @@ fun main(args: Array<String>) {
         println(HELP); return
     }
     try {
+        if (args.firstOrNull() == "tui") {
+            if (args.contentEquals(arrayOf("tui", "--help"))) {
+                println("cli tui — интерактивные панели и командная строка\n" +
+                    TuiCommands.all.joinToString("\n") { "${it.usage} — ${it.description}" })
+                return
+            }
+            require(args.size == 1) { "Использование: cli tui" }
+            TuiApplication.run()
+            return
+        }
         val options = parseArguments(args)
         when (options.command) {
             "listen" -> ListenCommand().run(options)
