@@ -18,6 +18,7 @@ kotlin { jvmToolchain(21) }
 dependencies {
     implementation(project(":core"))
     implementation(project(":agent"))
+    implementation("com.formdev:flatlaf:3.8")
     testImplementation(kotlin("test"))
 }
 

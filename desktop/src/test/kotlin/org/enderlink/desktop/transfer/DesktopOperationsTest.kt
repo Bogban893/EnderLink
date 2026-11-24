@@ -1,5 +1,7 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.transfer
 
+import org.enderlink.desktop.i18n.messages
+import org.enderlink.desktop.minecraft.MinecraftSaves
 import org.enderlink.world.WorldRepository
 import org.enderlink.worldtransfer.WorldTransferStats
 import org.junit.jupiter.api.Timeout
@@ -34,7 +36,7 @@ class DesktopOperationsTest {
             val incoming = executor.submit<WorldTransferStats> {
                 DesktopOperations(root.resolve("receiver-profile")).apply { begin() }.receive(
                     receiver, TransferTarget(Route.LOCAL, port = port),
-                    { if (it.startsWith("Ожидание подключения")) waiting.countDown() }, { _, _ -> },
+                    { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> },
                 )
             }
             assertTrue(waiting.await(5, TimeUnit.SECONDS))
@@ -56,7 +58,7 @@ class DesktopOperationsTest {
             val nextIncoming = executor.submit<WorldTransferStats> {
                 DesktopOperations(root.resolve("receiver-profile")).apply { begin() }.receive(
                     receiver, TransferTarget(Route.LOCAL, port = nextPort),
-                    { if (it.startsWith("Ожидание подключения")) waitingAgain.countDown() }, { _, _ -> },
+                    { if (it == messages.text("transfer.waiting", nextPort.toString())) waitingAgain.countDown() }, { _, _ -> },
                 )
             }
             assertTrue(waitingAgain.await(5, TimeUnit.SECONDS))
@@ -84,7 +86,7 @@ class DesktopOperationsTest {
             val incoming = executor.submit<Result<WorldTransferStats>> {
                 runCatching {
                     operations.receive(receiver, TransferTarget(Route.LOCAL, port = port),
-                        { if (it.startsWith("Ожидание подключения")) waiting.countDown() }, { _, _ -> })
+                        { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> })
                 }
             }
             assertTrue(waiting.await(5, TimeUnit.SECONDS))
@@ -123,7 +125,7 @@ class DesktopOperationsTest {
             val incoming = executor.submit<WorldTransferStats> {
                 DesktopOperations(root.resolve("receiver-profile")).apply { begin() }.receive(
                     receiver, TransferTarget(Route.LOCAL, port = port),
-                    { if (it.startsWith("Ожидание подключения")) waiting.countDown() }, { _, _ -> },
+                    { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> },
                 )
             }
             assertTrue(waiting.await(5, TimeUnit.SECONDS))

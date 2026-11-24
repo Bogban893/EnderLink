@@ -1,5 +1,6 @@
-package org.enderlink.desktop
+package org.enderlink.desktop.minecraft
 
+import org.enderlink.desktop.i18n.messages
 import org.enderlink.world.WorldEntry
 import org.enderlink.world.WorldManifest
 import org.enderlink.world.WorldRepository
@@ -42,17 +43,17 @@ object MinecraftSaves {
         val saves = savesDirectory.toAbsolutePath().normalize()
         val target = saves.resolve(folderName)
         if (saves.startsWith(repository.workingDirectory.parent) || repository.workingDirectory.parent.startsWith(saves)) {
-            throw IOException("Папка сохранений Minecraft должна быть отдельно от хранилища EnderLink")
+            throw IOException(messages.text("minecraft.repositoryOverlap"))
         }
         if (!Files.exists(target, NOFOLLOW_LINKS)) return 0
         if (!Files.isDirectory(target, NOFOLLOW_LINKS) || Files.isSymbolicLink(target)) {
-            throw IOException("Папка существующего мира должна быть обычным каталогом")
+            throw IOException(messages.text("minecraft.existingNotDirectory"))
         }
         val session = target.resolve("session.lock")
-        if (Files.isSymbolicLink(session)) throw IOException("session.lock не должен быть ссылкой")
+        if (Files.isSymbolicLink(session)) throw IOException(messages.text("minecraft.lockSymlink"))
         FileChannel.open(session, CREATE, READ, WRITE).use { channel ->
             val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
-                ?: throw IOException("Мир открыт в Minecraft. Закройте его перед получением обновления")
+                ?: throw IOException(messages.text("minecraft.openBeforeReceive"))
             lock.use { return repository.cacheObjectsFrom(target) }
         }
     }
@@ -63,16 +64,16 @@ object MinecraftSaves {
     ): MinecraftInstallResult {
         validateName(folderName)
         repository.verifyCurrent()
-        val incoming = repository.current() ?: throw IOException("В хранилище ещё нет версии мира")
+        val incoming = repository.current() ?: throw IOException(messages.text("minecraft.noVersion"))
         val saves = savesDirectory.toAbsolutePath().normalize()
         val repositoryRoot = repository.workingDirectory.parent
         if (saves.startsWith(repositoryRoot) || repositoryRoot.startsWith(saves)) {
-            throw IOException("Папка сохранений Minecraft должна быть отдельно от хранилища EnderLink")
+            throw IOException(messages.text("minecraft.repositoryOverlap"))
         }
-        if (Files.isSymbolicLink(saves)) throw IOException("Папка сохранений не должна быть ссылкой")
+        if (Files.isSymbolicLink(saves)) throw IOException(messages.text("minecraft.savesSymlink"))
         Files.createDirectories(saves)
         val metadata = saves.resolve(".enderlink-sync")
-        if (Files.isSymbolicLink(metadata)) throw IOException("Служебная папка сохранений не должна быть ссылкой")
+        if (Files.isSymbolicLink(metadata)) throw IOException(messages.text("minecraft.metadataSymlink"))
         Files.createDirectories(metadata)
         val target = saves.resolve(folderName)
         val stage = metadata.resolve("$folderName.stage")
@@ -81,11 +82,11 @@ object MinecraftSaves {
         val pending = metadata.resolve("$folderName.pending")
         FileChannel.open(metadata.resolve("sync.lock"), CREATE, WRITE).use { channel ->
             val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
-                ?: throw IOException("Другое обновление папки Minecraft ещё выполняется")
+                ?: throw IOException(messages.text("minecraft.syncBusy"))
             lock.use {
                 recover(repository, target, stage, backup, marker, pending)
                 if (Files.exists(target, NOFOLLOW_LINKS) && !Files.isDirectory(target, NOFOLLOW_LINKS)) {
-                    throw IOException("Путь мира уже занят файлом или ссылкой: $target")
+                    throw IOException(messages.text("minecraft.targetOccupied", target))
                 }
                 val previous = findPrevious(repository, target, marker, incoming, parentFingerprint)
                 val oldEntries = previous?.entries.orEmpty().filterNot(::isSessionLock).associateBy { it.path }
@@ -100,24 +101,24 @@ object MinecraftSaves {
                 copyTree(repository.workingDirectory, stage)
                 if (!matches(stage, incoming)) {
                     deleteTree(stage)
-                    throw IOException("Копия мира изменилась во время подготовки для Minecraft")
+                    throw IOException(messages.text("minecraft.copyChanged"))
                 }
                 // Minecraft uses this lock while the save is open. Keep the staged lock across rename.
                 FileChannel.open(stage.resolve("session.lock"), CREATE, READ, WRITE).use { stageChannel ->
                     val stageLock = try { stageChannel.tryLock() } catch (_: OverlappingFileLockException) { null }
-                        ?: throw IOException("Не удалось заблокировать подготовленный мир")
+                        ?: throw IOException(messages.text("minecraft.stageLockFailed"))
                     stageLock.use {
                         writeMarker(pending, incoming)
                         if (Files.exists(target, NOFOLLOW_LINKS)) {
                             if (Files.isSymbolicLink(target.resolve("session.lock"))) {
-                                throw IOException("session.lock не должен быть ссылкой")
+                                throw IOException(messages.text("minecraft.lockSymlink"))
                             }
                             FileChannel.open(target.resolve("session.lock"), CREATE, READ, WRITE).use { oldChannel ->
                                 val oldLock = try { oldChannel.tryLock() } catch (_: OverlappingFileLockException) { null }
-                                    ?: throw IOException("Мир открыт в Minecraft. Закройте его и повторите обновление")
+                                    ?: throw IOException(messages.text("minecraft.openBeforeInstall"))
                                 oldLock.use {
                                     if (!matches(target, requireNotNull(previous))) {
-                                        throw IOException("Мир изменён в Minecraft после предыдущей передачи. Сохраните его отдельно перед обновлением")
+                                        throw IOException(messages.text("minecraft.localChanges"))
                                     }
                                     move(target, backup)
                                     try { move(stage, target) }
@@ -140,20 +141,20 @@ object MinecraftSaves {
         parentFingerprint: ParentFingerprint?,
     ): WorldManifest? {
         if (!Files.exists(target, NOFOLLOW_LINKS)) {
-            if (Files.exists(marker, NOFOLLOW_LINKS)) throw IOException("Файл учёта есть, а папка мира исчезла: $target")
+            if (Files.exists(marker, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.targetMissing", target))
             return null
         }
-        if (Files.isSymbolicLink(target)) throw IOException("Папка мира не должна быть ссылкой")
+        if (Files.isSymbolicLink(target)) throw IOException(messages.text("minecraft.worldSymlink"))
         if (Files.exists(marker, NOFOLLOW_LINKS)) {
-            if (!Files.isRegularFile(marker, NOFOLLOW_LINKS)) throw IOException("Некорректный файл учёта мира")
+            if (!Files.isRegularFile(marker, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidMarker"))
             val properties = Properties().apply { Files.newInputStream(marker).use(::load) }
-            if (properties.getProperty("worldId") != incoming.worldId) throw IOException("В папке Minecraft был другой мир")
-            val savedVersion = properties.getProperty("versionId") ?: throw IOException("Нет ID предыдущей версии")
+            if (properties.getProperty("worldId") != incoming.worldId) throw IOException(messages.text("minecraft.differentWorld"))
+            val savedVersion = properties.getProperty("versionId") ?: throw IOException(messages.text("minecraft.previousVersionMissing"))
             val previous = runCatching { repository.load(savedVersion) }.getOrNull()
                 ?: matchingFingerprint(target, incoming, parentFingerprint?.takeIf { it.versionId == savedVersion })
-                ?: throw IOException("Нет предыдущей версии для проверки папки Minecraft")
+                ?: throw IOException(messages.text("minecraft.previousManifestMissing"))
             if (previous.worldId != incoming.worldId || !matches(target, previous)) {
-                throw IOException("Мир изменён в Minecraft после предыдущей передачи. Сохраните его отдельно перед обновлением")
+                throw IOException(messages.text("minecraft.localChanges"))
             }
             return previous
         }
@@ -161,7 +162,7 @@ object MinecraftSaves {
         val candidates = listOfNotNull(incoming, incoming.parentVersionId?.let { runCatching { repository.load(it) }.getOrNull() })
         return candidates.firstOrNull { matches(target, it) }
             ?: matchingFingerprint(target, incoming, parentFingerprint)
-            ?: throw IOException("Папка $target уже содержит другой мир. Выберите другое имя или сохраните его отдельно")
+            ?: throw IOException(messages.text("minecraft.unrelatedTarget", target))
     }
 
     private fun matchingFingerprint(
@@ -179,7 +180,7 @@ object MinecraftSaves {
     private fun recover(repository: WorldRepository, target: Path, stage: Path, backup: Path, marker: Path, pending: Path) {
         val transaction = if (Files.exists(pending, NOFOLLOW_LINKS)) readMarker(repository, pending) else null
         if (Files.exists(backup, NOFOLLOW_LINKS)) {
-            if (!Files.isDirectory(backup, NOFOLLOW_LINKS)) throw IOException("Некорректная резервная копия мира: $backup")
+            if (!Files.isDirectory(backup, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidBackup", backup))
             if (!Files.exists(target, NOFOLLOW_LINKS)) {
                 move(backup, target)
                 Files.deleteIfExists(pending)
@@ -191,7 +192,7 @@ object MinecraftSaves {
                 deleteTree(backup)
                 Files.deleteIfExists(pending)
             } else {
-                throw IOException("Незавершённое обновление мира: сохраните папки $target и $backup перед повтором")
+                throw IOException(messages.text("minecraft.interruptedUpdate", target, backup))
             }
         } else if (transaction != null) {
             if (Files.exists(target, NOFOLLOW_LINKS) && matches(target, transaction)) writeMarker(marker, transaction)
@@ -201,10 +202,10 @@ object MinecraftSaves {
     }
 
     private fun readMarker(repository: WorldRepository, path: Path): WorldManifest {
-        if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException("Некорректный файл учёта мира: $path")
+        if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidMarkerPath", path))
         val properties = Properties().apply { Files.newInputStream(path).use(::load) }
-        val manifest = repository.load(properties.getProperty("versionId") ?: throw IOException("Нет ID версии в $path"))
-        if (manifest.worldId != properties.getProperty("worldId")) throw IOException("ID мира в файле учёта не совпадает")
+        val manifest = repository.load(properties.getProperty("versionId") ?: throw IOException(messages.text("minecraft.markerVersionMissing", path)))
+        if (manifest.worldId != properties.getProperty("worldId")) throw IOException(messages.text("minecraft.worldIdMismatch"))
         return manifest
     }
 
@@ -231,7 +232,7 @@ object MinecraftSaves {
         require(name.isNotBlank() && name == name.trim() && name != "." && name != ".." &&
             name.none { it in "\\/:<>\"|?*" || it.isISOControl() } && !name.endsWith('.') &&
             !name.startsWith(".enderlink") && name.length <= 80) {
-            "Имя папки мира должно быть одним обычным именем без специальных символов"
+            messages.text("minecraft.folder.invalid")
         }
     }
 
@@ -240,12 +241,12 @@ object MinecraftSaves {
         try {
             Files.walkFileTree(source, object : SimpleFileVisitor<Path>() {
                 override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isDirectory) throw IOException("Необычный каталог мира: $dir")
+                    if (!attrs.isDirectory) throw IOException(messages.text("minecraft.unusualDirectory", dir))
                     if (dir != source) Files.createDirectory(destination.resolve(source.relativize(dir)))
                     return FileVisitResult.CONTINUE
                 }
                 override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isRegularFile) throw IOException("Ссылки в мире не поддерживаются: $file")
+                    if (!attrs.isRegularFile) throw IOException(messages.text("minecraft.unsupportedLink", file))
                     Files.copy(file, destination.resolve(source.relativize(file)), NOFOLLOW_LINKS)
                     return FileVisitResult.CONTINUE
                 }
