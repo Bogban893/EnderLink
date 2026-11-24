@@ -1,11 +1,10 @@
 package org.enderlink.cli.tui
 
-import com.googlecode.lanterna.TextColor
-import com.googlecode.lanterna.graphics.SimpleTheme
 import com.googlecode.lanterna.screen.TerminalScreen
 import com.googlecode.lanterna.gui2.MultiWindowTextGUI
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory
 import com.googlecode.lanterna.terminal.Terminal
+import com.googlecode.lanterna.terminal.MouseCaptureMode
 import com.googlecode.lanterna.terminal.ansi.UnixLikeTerminal
 import java.io.IOException
 
@@ -18,6 +17,7 @@ internal object TuiApplication {
             throw IOException("Первый прототип cli tui работает в Linux/macOS и WSL. Нативная консоль Windows пока не подключена.")
         }
         val terminal = DefaultTerminalFactory().setForceTextTerminal(true)
+            .setMouseCaptureMode(MouseCaptureMode.CLICK_RELEASE)
             .setUnixTerminalCtrlCBehaviour(UnixLikeTerminal.CtrlCBehaviour.TRAP).createTerminal()
         run(terminal)
     }
@@ -29,11 +29,7 @@ internal object TuiApplication {
                 TerminalScreen(it).use { screen ->
                     screen.startScreen()
                     val gui = MultiWindowTextGUI(screen).apply {
-                        theme = SimpleTheme(TextColor.ANSI.WHITE, TextColor.ANSI.BLACK).apply {
-                            defaultDefinition.setSelected(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
-                            defaultDefinition.setActive(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
-                            defaultDefinition.setPreLight(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
-                        }
+                        theme = TuiTheme.create()
                     }
                     TuiWindow().use { window -> gui.addWindowAndWait(window) }
                 }

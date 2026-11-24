@@ -13,6 +13,15 @@ internal class CommandInput(private val submit: (String) -> Unit) : TextBox(Term
 
     override fun handleKeyStroke(key: KeyStroke): Result {
         when {
+            key.isCtrlDown && key.character?.lowercaseChar() == 'w' -> {
+                val line = text
+                val end = caretPosition.column
+                var start = end
+                while (start > 0 && line[start - 1].isWhitespace()) start--
+                while (start > 0 && !line[start - 1].isWhitespace()) start--
+                text = line.removeRange(start, end)
+                setCaretPosition(start)
+            }
             key.keyType == KeyType.Enter -> {
                 val line = text
                 if (line.isNotBlank()) {
