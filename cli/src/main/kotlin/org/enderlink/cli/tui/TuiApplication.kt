@@ -1,5 +1,7 @@
 package org.enderlink.cli.tui
 
+import com.googlecode.lanterna.TextColor
+import com.googlecode.lanterna.graphics.SimpleTheme
 import com.googlecode.lanterna.screen.TerminalScreen
 import com.googlecode.lanterna.gui2.MultiWindowTextGUI
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory
@@ -26,7 +28,14 @@ internal object TuiApplication {
             terminal.use {
                 TerminalScreen(it).use { screen ->
                     screen.startScreen()
-                    TuiWindow().use { window -> MultiWindowTextGUI(screen).addWindowAndWait(window) }
+                    val gui = MultiWindowTextGUI(screen).apply {
+                        theme = SimpleTheme(TextColor.ANSI.WHITE, TextColor.ANSI.BLACK).apply {
+                            defaultDefinition.setSelected(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
+                            defaultDefinition.setActive(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
+                            defaultDefinition.setPreLight(TextColor.ANSI.BLACK, TextColor.ANSI.WHITE)
+                        }
+                    }
+                    TuiWindow().use { window -> gui.addWindowAndWait(window) }
                 }
             }
         } catch (error: RuntimeException) {
