@@ -13,6 +13,32 @@ class TuiSessionTest {
     @TempDir lateinit var root: Path
 
     @Test
+    fun `friend edits refresh state through common profile operations and retain state on failure`() {
+        val directory = Files.createDirectory(root.resolve("profile"))
+        Files.writeString(directory.resolve("secret.key"), "test-only")
+        val names = linkedMapOf<String, String>()
+        var initialized = false
+        val session = TuiSession(changeProfile = { options, report ->
+            assertEquals(directory.toString(), options.profile)
+            when (options.command) {
+                "id" -> initialized = true
+                "add" -> { names[requireNotNull(options.friendName)] = requireNotNull(options.friendId); report("saved") }
+                "remove" -> { require(names.remove(options.friendName) != null) { "Друг не найден" }; report("removed") }
+            }
+            "public-id" to names.toMap()
+        })
+        session.execute("profile ${TuiWords.quote(directory.toString())}")
+        assertFalse(session.execute("profile-init").error)
+        assertTrue(initialized)
+        assertFalse(session.execute("add alex public-friend-id").error)
+        assertEquals(listOf("alex"), session.state.friendNames)
+        assertTrue(session.execute("remove unknown").error)
+        assertEquals(listOf("alex"), session.state.friendNames)
+        assertFalse(session.execute("remove alex").error)
+        assertTrue(session.state.friendNames.isEmpty())
+    }
+
+    @Test
     fun `theme commands validate names and complete without touching world or profile`() {
         val session = TuiSession(readWorld = { error("unexpected read") }, readProfile = { error("unexpected read") })
         assertEquals(TuiThemeId.MONO, session.state.theme)
@@ -34,7 +60,7 @@ class TuiSessionTest {
         assertTrue(session.execute("repository \"unfinished").output.contains("кавычку"))
         assertEquals(0, reads)
         assertTrue(TuiCommands.hint("repository ").contains("<путь>"))
-        assertEquals(listOf("world-status"), TuiCommands.completions("wor"))
+        assertEquals(listOf("world-status"), TuiCommands.completions("world-st"))
         assertTrue(session.execute("exit extra").output.contains("Использование"))
         assertFalse(session.state.close)
     }

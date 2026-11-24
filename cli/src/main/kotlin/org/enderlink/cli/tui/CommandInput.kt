@@ -7,6 +7,7 @@ import com.googlecode.lanterna.input.KeyStroke
 import com.googlecode.lanterna.input.KeyType
 
 internal class CommandInput(private val submit: (String) -> Unit) : TextBox(TerminalSize(40, 1)) {
+    var requestCompletion: ((String) -> Unit)? = null
     private val history = mutableListOf<String>()
     private var historyIndex = 0
     private var draft = ""
@@ -39,8 +40,8 @@ internal class CommandInput(private val submit: (String) -> Unit) : TextBox(Term
             }
             key.keyType == KeyType.Tab -> {
                 if (caretPosition.column == text.length) {
-                    val options = TuiCommands.completions(text)
-                    if (options.size == 1) replaceLine(options.single() + " ")
+                    val complete = requestCompletion
+                    if (complete != null) complete(text) else applyCompletion(TuiCommands.completions(text))
                 }
             }
             key.keyType == KeyType.ArrowUp -> {
@@ -61,4 +62,11 @@ internal class CommandInput(private val submit: (String) -> Unit) : TextBox(Term
     }
 
     fun replaceLine(line: String) { text = line; setCaretPosition(line.length) }
+
+    fun applyCompletion(options: List<String>) {
+        if (options.size == 1) {
+            val value = options.single()
+            replaceLine(value + if (value.endsWith("/\"")) "" else " ")
+        }
+    }
 }

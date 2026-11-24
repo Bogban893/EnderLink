@@ -24,6 +24,55 @@ import kotlin.test.assertTrue
 
 class TuiWindowTest {
     @Test
+    fun `operation output is shown live and Ctrl X cancels without closing window`() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val session = TuiSession(operations = TuiOperations { _, report, control ->
+            control.resource(AutoCloseable { release.countDown() }) {
+                report("Передача: 42%")
+                started.countDown()
+                release.await()
+                control.checkCancelled()
+            }
+        })
+        try {
+            withGui(session) { _, _, gui, window ->
+                val output = window.component.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.last()
+                window.submit("world-receive --repository unused-test-repository")
+                assertTrue(started.await(3, TimeUnit.SECONDS))
+                awaitUi(gui) { output.text.contains("42%") }
+                gui.handleInput(KeyStroke('x', true, false))
+                awaitUi(gui) { output.text.contains("отменена") }
+                assertTrue(gui.windows.contains(window))
+                window.submit("theme ender")
+                awaitUi(gui) { output.text == "Тема: Ender / Void" }
+            }
+        } finally { release.countDown() }
+    }
+
+    @Test
+    fun `exit waits for protected disk operation instead of interrupting it`() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val session = TuiSession(operations = TuiOperations { _, _, operation ->
+            operation.protectCommit()
+            started.countDown()
+            release.await()
+            throw java.io.IOException("test commit finished")
+        })
+        try {
+            withGui(session) { _, _, gui, window ->
+                window.submit("world-receive --repository unused-test-repository")
+                assertTrue(started.await(3, TimeUnit.SECONDS))
+                gui.handleInput(KeyStroke(KeyType.F10))
+                assertTrue(gui.windows.contains(window))
+                release.countDown()
+                awaitUi(gui) { !gui.windows.contains(window) }
+            }
+        } finally { release.countDown() }
+    }
+
+    @Test
     fun `small terminals show size warning and restore data draft and focus`() = withGui { terminal, screen, gui, window ->
         val content = window.component
         val result = content.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.last()

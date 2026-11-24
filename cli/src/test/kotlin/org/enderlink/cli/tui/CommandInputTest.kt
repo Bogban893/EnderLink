@@ -26,7 +26,7 @@ class CommandInputTest {
     fun `completion and history only fill input until explicit execution`() {
         val calls = mutableListOf<String>()
         val input = CommandInput(calls::add)
-        input.replaceLine("wor")
+        input.replaceLine("world-st")
         input.handleKeyStroke(KeyStroke(KeyType.Tab))
         assertEquals("world-status ", input.text)
         assertTrue(calls.isEmpty())
@@ -43,5 +43,8 @@ class CommandInputTest {
         input.replaceLine("repository \"unfinished")
         input.handleKeyStroke(KeyStroke(KeyType.Enter))
         assertEquals("repository \"unfinished", input.text)
+        input.replaceLine("world-send --peer")
+        input.handleKeyStroke(KeyStroke(KeyType.Enter))
+        assertEquals("world-send --peer", input.text)
     }
 }
