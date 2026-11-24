@@ -23,6 +23,56 @@ import kotlin.test.assertTrue
 
 class TuiWindowTest {
     @Test
+    fun `theme button opens chooser and applies selected theme`() = withGui { terminal, _, gui, window ->
+        val button = window.component.descendants().filterIsInstance<TuiButton>().first { it.label == "Тема" }
+        window.focusedInteractable = button
+        terminal.addInput(KeyStroke(KeyType.ArrowDown))
+        terminal.addInput(KeyStroke(KeyType.Enter))
+        gui.handleInput(KeyStroke(KeyType.Enter))
+        val result = window.component.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.last()
+        awaitUi(gui) { result.text == "Тема: Ender / Void" }
+        assertEquals(1, gui.windows.size)
+        assertTrue(gui.windows.contains(window))
+    }
+
+    @Test
+    fun `live theme switch recolors frames headings placeholders and exit hover`() = withGui { terminal, _, gui, window ->
+        val fields = window.component.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.toList()
+        val frame = fields[0].parent
+        val origin = frame.parent.toGlobal(frame.position)
+        val oldSize = window.size
+        window.commandInput.replaceLine("repository \"Мой мир\"")
+        for (id in listOf(TuiThemeId.ENDER, TuiThemeId.BTOP, TuiThemeId.MONO)) {
+            window.submit("theme ${id.id}")
+            awaitUi(gui) { fields[2].text == "Тема: ${id.displayName}" }
+            gui.updateScreen()
+            val palette = TuiTheme.palette(id)
+            assertEquals(oldSize, window.size)
+            assertEquals("repository \"Мой мир\"", window.commandInput.text)
+            val corner = terminal.getCharacter(origin)
+            assertEquals(palette.border, corner.foregroundColor)
+            assertEquals(palette.background, corner.backgroundColor)
+            val heading = terminal.getCharacter(origin.withRelativeColumn(2))
+            assertEquals(palette.title, heading.foregroundColor)
+            assertEquals(id != TuiThemeId.MONO, heading.isBold)
+            assertEquals(palette.muted, terminal.getCharacter(fields[0].globalPosition).foregroundColor)
+            val inputFrame = window.commandInput.parent
+            assertEquals(palette.focusBorder, terminal.getCharacter(inputFrame.parent.toGlobal(inputFrame.position)).foregroundColor)
+        }
+        window.submit("theme ender")
+        awaitUi(gui) { fields[2].text == "Тема: Ender / Void" }
+        val exit = window.component.descendants().filterIsInstance<TuiButton>().first { it.danger }
+        val position = exit.globalPosition.withRelativeColumn(2).withRelativeRow(1)
+        gui.handleInput(MouseAction(MouseActionType.MOVE, 0, position))
+        gui.updateScreen()
+        val caption = terminal.getCharacter(position)
+        assertEquals(TuiTheme.palette(TuiThemeId.ENDER).danger, caption.backgroundColor)
+        assertTrue(caption.isBold)
+        assertSame(window.commandInput, window.focusedInteractable)
+        assertFalse(exit.isFocused)
+    }
+
+    @Test
     fun `world and friends panels grow in width and height after terminal resize`() = withGui { terminal, screen, gui, window ->
         val panels = window.component.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.take(2).toList()
         val previous = panels.map { it.size }
@@ -122,11 +172,21 @@ class TuiWindowTest {
     private fun Component.descendants(): Sequence<Component> = sequenceOf(this) +
         if (this is Container) childrenList.asSequence().flatMap { it.descendants() } else emptySequence()
 
+    private fun awaitUi(gui: MultiWindowTextGUI, ready: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!ready() && System.nanoTime() < deadline) {
+            gui.guiThread.processEventsAndUpdate()
+            Thread.sleep(5)
+        }
+        assertTrue(ready())
+    }
+
     private fun withGui(session: TuiSession = TuiSession(), test: (DefaultVirtualTerminal, TerminalScreen, MultiWindowTextGUI, TuiWindow) -> Unit) {
         DefaultVirtualTerminal(TerminalSize(100, 32)).use { terminal ->
             TerminalScreen(terminal).use { screen ->
                 screen.startScreen()
                 val gui = MultiWindowTextGUI(screen).apply { theme = TuiTheme.create() }
+                gui.setBlockingIO(false)
                 TuiWindow(session).use { window ->
                     gui.addWindow(window)
                     gui.updateScreen()

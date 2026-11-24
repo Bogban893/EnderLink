@@ -16,22 +16,23 @@ internal object TuiApplication {
         if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             throw IOException("Первый прототип cli tui работает в Linux/macOS и WSL. Нативная консоль Windows пока не подключена.")
         }
+        val session = TuiSession(themeSettings = TuiThemeSettings(TuiThemeSettings.defaultPath()))
         val terminal = DefaultTerminalFactory().setForceTextTerminal(true)
-            .setMouseCaptureMode(MouseCaptureMode.CLICK_RELEASE)
+            .setMouseCaptureMode(MouseCaptureMode.CLICK_RELEASE_DRAG_MOVE)
             .setUnixTerminalCtrlCBehaviour(UnixLikeTerminal.CtrlCBehaviour.TRAP).createTerminal()
-        run(terminal)
+        run(terminal, session)
     }
 
     /** Owns and closes the terminal, restoring the previous screen even when the GUI fails. */
-    internal fun run(terminal: Terminal) {
+    internal fun run(terminal: Terminal, session: TuiSession = TuiSession()) {
         try {
             terminal.use {
                 TerminalScreen(it).use { screen ->
                     screen.startScreen()
                     val gui = MultiWindowTextGUI(screen).apply {
-                        theme = TuiTheme.create()
+                        theme = TuiTheme.create(session.state.theme)
                     }
-                    TuiWindow().use { window -> gui.addWindowAndWait(window) }
+                    TuiWindow(session).use { window -> gui.addWindowAndWait(window) }
                 }
             }
         } catch (error: RuntimeException) {

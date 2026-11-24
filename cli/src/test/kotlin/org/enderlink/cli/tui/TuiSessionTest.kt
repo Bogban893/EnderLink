@@ -13,6 +13,20 @@ class TuiSessionTest {
     @TempDir lateinit var root: Path
 
     @Test
+    fun `theme commands validate names and complete without touching world or profile`() {
+        val session = TuiSession(readWorld = { error("unexpected read") }, readProfile = { error("unexpected read") })
+        assertEquals(TuiThemeId.MONO, session.state.theme)
+        assertEquals(TuiThemeId.ENDER, session.execute("theme ender").theme)
+        assertEquals(TuiThemeId.BTOP, session.execute("theme btop").theme)
+        assertTrue(session.execute("theme unknown").error)
+        assertEquals(TuiThemeId.BTOP, session.state.theme)
+        assertEquals(TuiThemeId.BTOP, session.execute("theme").theme)
+        assertTrue(session.state.output.contains("theme mono"))
+        assertEquals(listOf("theme ender"), TuiCommands.completions("theme en"))
+        assertEquals(TuiThemeId.MONO, session.execute("theme mono").theme)
+    }
+
+    @Test
     fun `quoted Windows paths survive parsing and incomplete input is not executed`() {
         assertEquals(listOf("C:\\Игры\\Мой мир\\"), TuiCommands.parse("repository \"C:\\Игры\\Мой мир\\\"").second)
         var reads = 0

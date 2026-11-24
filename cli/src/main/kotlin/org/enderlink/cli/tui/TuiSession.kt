@@ -15,14 +15,17 @@ internal data class TuiState(
     val output: String = "Просмотр миров и друзей. help — команды. Передача в TUI пока не подключена.",
     val close: Boolean = false,
     val error: Boolean = false,
+    val theme: TuiThemeId = TuiThemeId.MONO,
+    val friendsLoaded: Boolean = false,
 )
 
 /** Read operations are injectable; both buttons and command input use the same session. */
 internal class TuiSession(
     private val readWorld: (Path) -> String = ::readWorldStatus,
     private val readProfile: (Path) -> Pair<String, Map<String, String>> = ::readProfileStatus,
+    private val themeSettings: TuiThemeSettings? = null,
 ) {
-    var state = TuiState()
+    var state = TuiState(theme = themeSettings?.load() ?: TuiThemeId.MONO)
         private set
 
     /** Called sequentially on the TUI worker, never on its drawing thread. */
@@ -43,12 +46,21 @@ internal class TuiSession(
                 "profile" -> {
                     val path = Path.of(arguments.single()).toAbsolutePath().normalize()
                     require(Files.isRegularFile(path.resolve("secret.key"), NOFOLLOW_LINKS)) { "Выберите существующий профиль с secret.key" }
-                    state.copy(profile = path, friends = "Профиль не загружен. Введите friends.", output = "Профиль выбран: $path")
+                    state.copy(profile = path, friendsLoaded = false, friends = "Профиль не загружен. Введите friends.", output = "Профиль выбран: $path")
                 }
                 "friends", "id" -> {
                     val (id, friends) = readProfile(state.profile)
-                    state.copy(friends = friends.keys.joinToString("\n") { "$it — доступность неизвестна" }
+                    state.copy(friendsLoaded = true, friends = friends.keys.joinToString("\n") { "$it — доступность неизвестна" }
                         .ifEmpty { "Сохранённых друзей нет." }, output = "Ваш ID: $id\nПрофиль: ${state.profile}")
+                }
+                "theme" -> {
+                    if (arguments.isEmpty()) state.copy(output = "Текущая тема: ${state.theme.displayName}\n" +
+                        TuiThemeId.entries.joinToString("\n") { "theme ${it.id} — ${it.displayName}" })
+                    else {
+                        val theme = requireNotNull(TuiThemeId.fromId(arguments.single())) { "Темы: mono, ender, btop" }
+                        themeSettings?.save(theme)
+                        state.copy(theme = theme, output = "Тема: ${theme.displayName}")
+                    }
                 }
                 "clear" -> state.copy(output = "")
                 "exit" -> state.copy(close = true)
