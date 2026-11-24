@@ -64,10 +64,10 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
         action("Выход", danger = true) { submit("exit") }
         val bottom = Panel(LinearLayout())
         val fill = LinearLayout.createLayoutData(LinearLayout.Alignment.Fill)
-        bottom.addComponent(status, fill)
         bottom.addComponent(EmptySpace(TerminalSize(0, 1)))
         bottom.addComponent(actions, LinearLayout.createLayoutData(LinearLayout.Alignment.Beginning))
         bottom.addComponent(commandInput.withBorder(TuiFrame("Команда EnderLink")), fill)
+        bottom.addComponent(status, fill)
         bottom.addComponent(hint, fill)
         bottom.addComponent(footer, fill)
         root.addComponent(bottom, BorderLayout.Location.BOTTOM)
