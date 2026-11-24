@@ -5,5 +5,6 @@ rootProject.name = "EnderLink"
 include("core")
 include("agent")
 include("cli")
+include("desktop")
 include("connectivity-test")
 include("iroh-test")

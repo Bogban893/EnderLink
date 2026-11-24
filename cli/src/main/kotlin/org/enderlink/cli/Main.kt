@@ -13,7 +13,7 @@ import kotlin.system.exitProcess
 
 private val networkCommands = setOf("listen", "connect", "send", "receive", "world-send", "world-receive")
 private val profileCommands = setOf("id", "add", "friends", "remove")
-private val localWorldCommands = setOf("world-publish", "world-status", "world-checkout")
+private val localWorldCommands = setOf("world-publish", "world-status", "world-checkout", "world-import-owner")
 private val commands = networkCommands + profileCommands + localWorldCommands
 private const val HELP = """EnderLink — чат, файлы и версии мира по TCP или через интернет (iroh)
 TCP:
@@ -22,10 +22,11 @@ TCP:
   receive --output <каталог> [--host <адрес>] [--port <порт>] [--retries <0..5>]
   send --host <адрес> (--file <путь> | --directory <каталог>) [--port <порт>] [--retries <0..5>]
   world-publish --source <закрытый мир> --repository <каталог>
+  world-import-owner --repository <каталог> --owner-uuid <UUID>
   world-status --repository <каталог>
   world-checkout --repository <каталог> --version <ID>
   world-receive --repository <каталог> [--host <адрес>] [--port <порт>]
-  world-send --repository <каталог> --host <адрес> [--port <порт>]
+  world-send --repository <каталог> [--source <закрытый мир>] --host <адрес> [--port <порт>]
 Интернет:
   id | friends
   add <имя> <ID> | remove <имя>
@@ -34,7 +35,7 @@ TCP:
   receive --iroh --output <каталог> [--peer <имя>] [--retries <0..5>]
   send --peer <имя> (--file <путь> | --directory <каталог>) [--relay <https://адрес>] [--retries <0..5>]
   world-receive --repository <каталог> --iroh [--peer <имя>]
-  world-send --repository <каталог> --peer <имя> [--relay <https://адрес>]
+  world-send --repository <каталог> [--source <закрытый мир>] --peer <имя> [--relay <https://адрес>]
 
 Для iroh: --profile <каталог>, --debug (сеть). Профиль по умолчанию: ~/.enderlink/iroh-test.
 Оба участника один раз добавляют ID друг друга. Relay после успеха запоминается.
@@ -50,6 +51,7 @@ data class CliOptions(
     val friendName: String? = null, val friendId: String? = null,
     val repository: String? = null, val source: String? = null,
     val version: String? = null,
+    val ownerUuid: String? = null,
     val retries: Int = 2,
 )
 
@@ -64,6 +66,7 @@ fun parseArguments(args: Array<String>): CliOptions {
         when (command) {
             "world-publish" -> setOf("--repository", "--source")
             "world-checkout" -> setOf("--repository", "--version")
+            "world-import-owner" -> setOf("--repository", "--owner-uuid")
             else -> setOf("--repository")
         }
     } else {
@@ -72,7 +75,7 @@ fun parseArguments(args: Array<String>): CliOptions {
             "send" -> base + setOf("--file", "--directory", "--relay", "--retries")
             "receive" -> base + setOf("--output", "--retries")
             "connect" -> base + "--relay"
-            "world-send" -> base + setOf("--repository", "--relay")
+            "world-send" -> base + setOf("--repository", "--source", "--relay")
             "world-receive" -> base + "--repository"
             else -> base
         }
@@ -111,13 +114,19 @@ fun parseArguments(args: Array<String>): CliOptions {
     if (command.startsWith("world-")) require(!options["--repository"].isNullOrBlank()) { "Необходим --repository" }
     if (command == "world-publish") require(!options["--source"].isNullOrBlank()) { "Необходим --source" }
     if (command == "world-checkout") require(!options["--version"].isNullOrBlank()) { "Необходим --version" }
+    if (command == "world-import-owner") {
+        val owner = options["--owner-uuid"]
+        require(!owner.isNullOrBlank()) { "Необходим --owner-uuid" }
+        val parsed = runCatching { java.util.UUID.fromString(owner) }.getOrNull()
+        require(parsed != null && parsed.toString().equals(owner, ignoreCase = true)) { "Нужен полный UUID аккаунта Minecraft" }
+    }
     val port = options["--port"]?.let { requireNotNull(it.toIntOrNull()) { "Порт должен быть целым числом" } } ?: 25570
     require(port in 1..65535) { "Порт должен быть в диапазоне 1..65535" }
     val retries = options["--retries"]?.toIntOrNull() ?: if ("--retries" in options) throw IllegalArgumentException("Число повторов должно быть целым") else 2
     require(retries in 0..5) { "Число повторов должно быть от 0 до 5" }
     return CliOptions(command, host, port, options["--file"], options["--output"], options["--directory"],
         iroh, peer, profile, options["--relay"], "--debug" in options, positional.getOrNull(0), positional.getOrNull(1),
-        options["--repository"], options["--source"], options["--version"], retries)
+        options["--repository"], options["--source"], options["--version"], options["--owner-uuid"], retries)
 }
 
 fun main(args: Array<String>) {
@@ -132,7 +141,7 @@ fun main(args: Array<String>) {
             "connect" -> ConnectCommand().run(options)
             "send" -> SendCommand().run(options)
             "receive" -> ReceiveCommand().run(options)
-            "world-publish", "world-status", "world-checkout", "world-send", "world-receive" -> WorldCommand().run(options)
+            "world-publish", "world-status", "world-checkout", "world-import-owner", "world-send", "world-receive" -> WorldCommand().run(options)
             else -> IrohProfile.open(options.profile?.let(Path::of) ?: IrohProfile.defaultDirectory()).use { profile ->
                 when (options.command) {
                     "id" -> println("Ваш ID: ${profile.id}")

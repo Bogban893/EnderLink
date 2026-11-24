@@ -36,7 +36,10 @@ class WorldTransferTest {
         return sender to receiver
     }
 
-    private fun exchange(sender: WorldRepository, receiver: WorldRepository, dropAfterData: Int? = null): WorldTransferStats {
+    private fun exchange(
+        sender: WorldRepository, receiver: WorldRepository, dropAfterData: Int? = null,
+        onReceiverSend: (ByteArray) -> Unit = {},
+    ): WorldTransferStats {
         TcpListener.open(0, "127.0.0.1").use { listener ->
             TcpConnection.connect(Endpoint("127.0.0.1", listener.port)).use { client ->
                 listener.accept(2_000).use { server ->
@@ -45,9 +48,15 @@ class WorldTransferTest {
                     val executor = Executors.newSingleThreadExecutor()
                     try {
                         val receiving = executor.submit<WorldTransferStats> {
-                            if (dropAfterData != null) assertFailsWith<IOException> { WorldTransfer.receive(receiver, server) }
+                            val incoming = object : Connection by server {
+                                override fun send(payload: ByteArray) {
+                                    onReceiverSend(payload)
+                                    server.send(payload)
+                                }
+                            }
+                            if (dropAfterData != null) assertFailsWith<IOException> { WorldTransfer.receive(receiver, incoming) }
                                 .let { WorldTransferStats("failed", 0, 0) }
-                            else WorldTransfer.receive(receiver, server)
+                            else WorldTransfer.receive(receiver, incoming)
                         }
                         var dataCount = 0
                         val outgoing = object : Connection by client {
@@ -72,6 +81,23 @@ class WorldTransferTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `несколько новых объектов запрашиваются одним сообщением на группу`() {
+        val sender = WorldRepository(root.resolve("batched-sender"))
+        val receiver = WorldRepository(root.resolve("batched-receiver"))
+        Files.createDirectories(sender.workingDirectory)
+        val bytes = ByteArray(16 * WorldManifest.BLOCK_SIZE) { (it / WorldManifest.BLOCK_SIZE).toByte() }
+        Files.write(sender.workingDirectory.resolve("region.mca"), bytes)
+        val objects = sender.publish(sender.workingDirectory).objects().size
+        var requests = 0
+        exchange(sender, receiver, onReceiverSend = { frame ->
+            if (frame.size >= 5 && frame[4].toInt() == WorldTransferProtocol.REQUEST_BATCH) requests++
+        })
+        assertEquals((objects + WorldTransferProtocol.OBJECTS_PER_BATCH - 1) / WorldTransferProtocol.OBJECTS_PER_BATCH, requests)
+        assertTrue(requests < objects)
+        assertTrue(bytes.contentEquals(Files.readAllBytes(receiver.workingDirectory.resolve("region.mca"))))
     }
 
     @Test
@@ -184,7 +210,8 @@ class WorldTransferTest {
         val (sender, receiver) = repositories()
         exchange(sender, receiver)
         val previous = receiver.current()!!
-        Files.write(sender.workingDirectory.resolve("new-large"), ByteArray(300_000) { (it % 199).toByte() })
+        Files.write(sender.workingDirectory.resolve("new-large"),
+            ByteArray(8 * WorldManifest.BLOCK_SIZE) { (it / WorldManifest.BLOCK_SIZE).toByte() })
         sender.publish(sender.workingDirectory)
         val receiverRoot = root.resolve("receiver")
         val failing = WorldRepository(receiverRoot) { path ->

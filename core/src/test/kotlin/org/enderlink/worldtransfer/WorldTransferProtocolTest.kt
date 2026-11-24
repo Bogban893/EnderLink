@@ -8,8 +8,54 @@ import org.enderlink.world.WorldEntryType
 import org.enderlink.world.WorldManifest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertContentEquals
+import kotlin.test.assertFailsWith
+import java.io.IOException
 
 class WorldTransferProtocolTest {
+    @Test
+    fun `parent fingerprint matches previous version without session lock`() {
+        val worldId = WorldManifest.newWorldId()
+        val parent = WorldManifest.create(worldId, null, listOf(
+            WorldEntry("level.dat", WorldEntryType.FILE, 1, "sha256:" + "a".repeat(64),
+                listOf(WorldBlock("sha256:" + "a".repeat(64), 1))),
+            WorldEntry("session.lock", WorldEntryType.FILE, 1, "sha256:" + "b".repeat(64),
+                listOf(WorldBlock("sha256:" + "b".repeat(64), 1))),
+        ))
+        val child = WorldManifest.create(worldId, parent.versionId, parent.entries)
+        val frames = ArrayDeque<ByteArray>()
+        val connection = object : Connection {
+            override fun send(payload: ByteArray) { frames.addLast(payload) }
+            override fun receive(): ByteArray? = frames.removeFirstOrNull()
+            override fun close() {}
+        }
+        WorldTransferProtocol.sendParentHint(connection, parent)
+        val hint = WorldTransferProtocol.readParentHint(connection, child)!!
+        assertEquals(parent.versionId, hint.versionId)
+        assertEquals(WorldManifest.create(worldId, null, parent.entries.filterNot { it.path == "session.lock" }).treeHash,
+            hint.contentHash)
+        WorldTransferProtocol.sendParentHint(connection, parent)
+        assertFailsWith<IOException> { WorldTransferProtocol.readParentHint(connection, parent) }
+    }
+
+    @Test
+    fun `групповой запрос передает маску нужных объектов и отклоняет лишние биты`() {
+        val frames = ArrayDeque<ByteArray>()
+        val connection = object : Connection {
+            override fun send(payload: ByteArray) { frames.addLast(payload) }
+            override fun receive(): ByteArray? = frames.removeFirstOrNull()
+            override fun close() {}
+        }
+        val needed = booleanArrayOf(true, false, true, true, false, false, true, false)
+        WorldTransferProtocol.sendRequests(connection, needed)
+        assertContentEquals(needed, WorldTransferProtocol.readRequests(connection, needed.size))
+        WorldTransferProtocol.sendRequests(connection, booleanArrayOf(true, false))
+        assertFailsWith<IOException> { WorldTransferProtocol.readRequests(connection, 3) }
+        WorldTransferProtocol.sendRequests(connection, booleanArrayOf(true, false))
+        frames.first()[6] = 0x80.toByte()
+        assertFailsWith<IOException> { WorldTransferProtocol.readRequests(connection, 2) }
+    }
+
     @Test
     fun `манифест большого файла помещается в кадры Connection`() {
         val hash = "sha256:" + "a".repeat(64)

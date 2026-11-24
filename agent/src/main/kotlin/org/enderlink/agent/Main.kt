@@ -11,6 +11,7 @@ import kotlin.system.exitProcess
 
 private const val HELP = """EnderLink agent — локальный Vanilla Java сервер
   host --repository <каталог> --server-dir <каталог> --jar <server.jar> [--version <ID>] [--java <путь>]
+  host-service --repository <каталог> --server-dir <каталог> --jar <server.jar> [--version <ID>] [--java <путь>]
   tunnel-host --peer <имя> [--profile <каталог>] [--target-host <адрес>] [--target-port <порт>]
   tunnel-join --peer <имя> [--profile <каталог>] [--local-port <порт>] [--relay <https://адрес>]
 
@@ -24,7 +25,7 @@ fun main(args: Array<String>) {
     try {
         val command = args[0]
         val allowed = when (command) {
-            "host" -> setOf("--repository", "--server-dir", "--jar", "--version", "--java")
+            "host", "host-service" -> setOf("--repository", "--server-dir", "--jar", "--version", "--java")
             "tunnel-host" -> setOf("--peer", "--profile", "--target-host", "--target-port")
             "tunnel-join" -> setOf("--peer", "--profile", "--local-port", "--relay")
             else -> throw IllegalArgumentException("Неизвестная команда")
@@ -46,7 +47,9 @@ fun main(args: Array<String>) {
         val server = VanillaServer(repository, serverDir, values["--version"])
         server.prepare()
         println("Подготовлена версия ${server.versionId}: ${server.worldDirectory}")
-        server.start(listOf(java, "-jar", jar.toString(), "nogui"))
+        val launch = listOf(java, "-jar", jar.toString(), "nogui")
+        if (command == "host-service") { HostService.run(server, launch); return }
+        server.start(launch)
         println("Процесс сервера запущен. Команды: status, save, stop")
         val commands = LinkedBlockingQueue<String>()
         Thread({

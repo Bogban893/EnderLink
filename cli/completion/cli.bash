@@ -11,7 +11,7 @@ _enderlink_cli_complete() {
     if (( COMP_CWORD == 1 )); then
         while IFS= read -r candidate; do
             COMPREPLY+=("$candidate")
-        done < <(compgen -W 'listen connect send receive world-publish world-status world-checkout world-send world-receive id add friends remove --help -h' -- "$current")
+        done < <(compgen -W 'listen connect send receive world-publish world-import-owner world-status world-checkout world-send world-receive id add friends remove --help -h' -- "$current")
         return 0
     fi
 
@@ -30,7 +30,7 @@ _enderlink_cli_complete() {
             fi
             return 0
             ;;
-        --host|--port|--peer|--relay|--version)
+        --host|--port|--peer|--relay|--version|--owner-uuid)
             # Адрес и порт вводятся пользователем, без выдуманных значений.
             return 0
             ;;
@@ -42,9 +42,10 @@ _enderlink_cli_complete() {
         send) options=(--host --port --file --directory --peer --iroh --profile --relay --debug --help) ;;
         receive) options=(--host --port --output --iroh --peer --profile --debug --help) ;;
         world-publish) options=(--source --repository --help) ;;
+        world-import-owner) options=(--repository --owner-uuid --help) ;;
         world-status) options=(--repository --help) ;;
         world-checkout) options=(--repository --version --help) ;;
-        world-send) options=(--repository --host --port --peer --iroh --profile --relay --debug --help) ;;
+        world-send) options=(--repository --source --host --port --peer --iroh --profile --relay --debug --help) ;;
         world-receive) options=(--repository --host --port --iroh --peer --profile --debug --help) ;;
         id|friends) options=(--profile --help) ;;
         add) (( COMP_CWORD < 4 )) && return 0; options=(--profile) ;;

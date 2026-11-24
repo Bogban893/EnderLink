@@ -12,6 +12,10 @@ public final class FakeServerProcess {
             System.err.println("Startup failed");
             System.exit(7);
         }
+        if (args.length > 0 && args[0].equals("exit")) {
+            Files.writeString(Path.of("world", "level.dat"), "updated world");
+            return;
+        }
         System.out.println("Fake server ready");
         try (var input = new BufferedReader(new InputStreamReader(System.in))) {
             String line;

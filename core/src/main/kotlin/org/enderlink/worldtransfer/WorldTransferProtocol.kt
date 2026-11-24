@@ -15,20 +15,22 @@ import java.io.IOException
 import java.io.InputStream
 
 internal object WorldTransferProtocol {
-    private const val MAGIC = 0x454c5732 // ELW2, отдельно от обычной передачи ELF1
+    private const val MAGIC = 0x454c5734 // ELW4: групповые запросы и отпечаток предыдущего мира
     const val HEADER = 1
     const val ENTRY = 2
     const val READY = 3
     const val SAME = 4
-    const val HAVE = 5
-    const val NEED = 6
     const val DATA = 7
     const val END = 8
-    const val STORED = 9
     const val COMPLETE = 10
     const val ERROR = 11
     const val BLOCK = 12
+    const val REQUEST_BATCH = 13
+    const val STORED_BATCH = 14
+    const val PARENT_HINT = 15
+    const val PARENT_NONE = 16
     const val BLOCK_SIZE = 256 * 1024
+    const val OBJECTS_PER_BATCH = 8
     private const val MAX_ENTRIES = 1_000_000
 
     fun send(connection: Connection, type: Int, body: ByteArray = byteArrayOf()) {
@@ -53,12 +55,61 @@ internal object WorldTransferProtocol {
         if (type != expected || body.isNotEmpty()) throw IOException("Неожиданное сообщение версии мира: $type")
     }
 
+    fun sendRequests(connection: Connection, needed: BooleanArray) {
+        require(needed.size in 1..OBJECTS_PER_BATCH)
+        val body = ByteArray(2)
+        body[0] = needed.size.toByte()
+        for (index in needed.indices) {
+            if (needed[index]) body[1] = (body[1].toInt() or (1 shl index)).toByte()
+        }
+        send(connection, REQUEST_BATCH, body)
+    }
+
+    fun readRequests(connection: Connection, expectedCount: Int): BooleanArray {
+        require(expectedCount in 1..OBJECTS_PER_BATCH)
+        val (type, body) = read(connection)
+        if (type != REQUEST_BATCH || body.size != 2) throw IOException("Некорректный групповой запрос объектов")
+        if (body[0].toInt() != expectedCount) throw IOException("Число объектов в запросе не совпадает")
+        val flags = body[1].toInt() and 0xff
+        if (flags ushr expectedCount != 0) throw IOException("Лишние флаги в запросе объектов")
+        return BooleanArray(expectedCount) { flags and (1 shl it) != 0 }
+    }
+
     fun sendError(connection: Connection, error: Throwable) {
         runCatching {
             val bytes = ByteArrayOutputStream()
             DataOutputStream(bytes).use { it.writeUTF((error.message ?: "Ошибка передачи мира").take(1000)) }
             send(connection, ERROR, bytes.toByteArray())
         }
+    }
+
+    fun sendParentHint(connection: Connection, parent: WorldManifest?) {
+        if (parent == null) { send(connection, PARENT_NONE); return }
+        parent.validate()
+        val contentHash = WorldManifest.create(parent.worldId, null,
+            parent.entries.filterNot { it.path == "session.lock" }, parent.formatVersion).treeHash
+        val bytes = ByteArrayOutputStream()
+        DataOutputStream(bytes).use { out ->
+            out.writeUTF(parent.versionId)
+            out.writeInt(parent.formatVersion)
+            out.writeUTF(contentHash)
+        }
+        send(connection, PARENT_HINT, bytes.toByteArray())
+    }
+
+    fun readParentHint(connection: Connection, manifest: WorldManifest): ParentFingerprint? {
+        val (type, body) = read(connection)
+        if (type == PARENT_NONE && body.isEmpty()) return null
+        if (type != PARENT_HINT) throw IOException("Ожидается отпечаток предыдущего мира")
+        val input = DataInputStream(ByteArrayInputStream(body))
+        val version = input.readUTF()
+        val format = input.readInt()
+        val contentHash = input.readUTF()
+        if (input.available() != 0 || version != manifest.parentVersionId || format !in 1..WorldManifest.FORMAT_VERSION ||
+            !contentHash.matches(Regex("sha256:[0-9a-f]{64}"))) {
+            throw IOException("Некорректный отпечаток предыдущего мира")
+        }
+        return ParentFingerprint(version, format, contentHash)
     }
 
     fun sendManifest(connection: Connection, manifest: WorldManifest) {

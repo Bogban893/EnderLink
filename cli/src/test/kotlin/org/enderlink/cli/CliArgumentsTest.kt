@@ -11,7 +11,11 @@ class CliArgumentsTest {
         assertEquals("world", parseArguments(arrayOf("world-publish", "--source", "world", "--repository", "repo")).source)
         assertEquals(true, parseArguments(arrayOf("world-receive", "--repository", "repo", "--iroh")).iroh)
         assertEquals("friend", parseArguments(arrayOf("world-send", "--repository", "repo", "--peer", "friend")).peer)
+        assertEquals("saves/world", parseArguments(arrayOf("world-send", "--repository", "repo", "--source", "saves/world", "--peer", "friend")).source)
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-receive", "--repository", "repo", "--source", "world")) }
         assertEquals("sha256:id", parseArguments(arrayOf("world-checkout", "--repository", "repo", "--version", "sha256:id")).version)
+        assertEquals("123e4567-e89b-12d3-a456-426614174000", parseArguments(arrayOf("world-import-owner", "--repository", "repo", "--owner-uuid", "123e4567-e89b-12d3-a456-426614174000")).ownerUuid)
+        assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-import-owner", "--repository", "repo", "--owner-uuid", "alex")) }
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-send", "--repository", "repo")) }
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-receive", "--output", "out")) }
         assertFailsWith<IllegalArgumentException> { parseArguments(arrayOf("world-publish", "--repository", "repo", "--host", "localhost")) }

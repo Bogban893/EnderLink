@@ -17,6 +17,7 @@ import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.zip.GZIPOutputStream
 
 class WorldConflictException(val local: String?, val incoming: String) : IOException(
     "Конфликт версий мира: локальная ${local ?: "отсутствует"}, входящая $incoming"
@@ -93,14 +94,84 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
     }
 
     /** Публикация закрытого мира. При публикации рабочего каталога игра уже могла изменить его байты. */
-    fun publish(source: Path, worldId: String? = null): WorldManifest = locked {
+    fun publish(source: Path, worldId: String? = null): WorldManifest = locked { publishLocked(source, worldId) }
+
+    /** Saves blocks from an existing local Minecraft world without making it the active version. */
+    fun cacheObjectsFrom(source: Path): Int = locked {
+        val directory = source.toAbsolutePath().normalize()
+        val scanned = WorldScanner.scan(directory, WorldManifest.newWorldId())
+        var added = 0
+        for (entry in scanned.entries.filter { it.type == WorldEntryType.FILE }) {
+            Files.newInputStream(directory.resolve(entry.path), NOFOLLOW_LINKS).use { input ->
+                for (block in entry.blocks) {
+                    val bytes = ByteArray(block.size)
+                    if (WorldScanner.readBlock(input, bytes) != block.size) throw IOException("Мир изменился во время сравнения: ${entry.path}")
+                    val ref = WorldObjectRef(block.hash, block.size.toLong())
+                    if (!matchesObject(objectPath(ref.hash), ref)) {
+                        putObject(ref, ByteArrayInputStream(bytes))
+                        added++
+                    }
+                }
+                if (input.read() != -1) throw IOException("Мир изменился во время сравнения: ${entry.path}")
+            }
+        }
+        added
+    }
+
+    /** One-time migration of an old singleplayer owner into the server's UUID file. */
+    fun importLegacyPlayer(owner: UUID): WorldManifest = locked {
+        recoverLocked()
+        val current = readActive() ?: throw IOException("Сначала опубликуйте закрытый одиночный мир")
+        if (!matchesWorking(current)) throw IOException("Рабочий мир изменён после публикации")
+        val nbt = PlayerDataInspector.extractLegacyPlayer(work)
+        val playerDirectory = work.resolve("playerdata")
+        if (Files.exists(playerDirectory, NOFOLLOW_LINKS) && !Files.isDirectory(playerDirectory, NOFOLLOW_LINKS)) {
+            throw IOException("playerdata должен быть обычным каталогом")
+        }
+        val createdDirectory = !Files.exists(playerDirectory, NOFOLLOW_LINKS)
+        if (createdDirectory) Files.createDirectory(playerDirectory)
+        val target = playerDirectory.resolve("$owner.dat")
+        try {
+            if (Files.exists(target, NOFOLLOW_LINKS)) throw IOException("Файл игрока уже существует: $target")
+            val temp = Files.createTempFile(playerDirectory, ".enderlink-player-", ".tmp")
+            try {
+                GZIPOutputStream(Files.newOutputStream(temp)).use { it.write(nbt) }
+                if (Files.exists(target, NOFOLLOW_LINKS)) throw IOException("Файл игрока уже существует: $target")
+                Files.move(temp, target)
+            } finally { Files.deleteIfExists(temp) }
+            try { publishLocked(work, null) }
+            catch (error: Exception) { Files.deleteIfExists(target); throw error }
+        } finally {
+            if (createdDirectory && Files.isDirectory(playerDirectory, NOFOLLOW_LINKS)) {
+                Files.newDirectoryStream(playerDirectory).use { if (!it.iterator().hasNext()) Files.delete(playerDirectory) }
+            }
+        }
+    }
+
+    private fun publishLocked(source: Path, worldId: String?): WorldManifest {
         recoverLocked()
         val old = readActive()
         if (old != null && worldId != null && old.worldId != worldId) throw IOException("ID мира не совпадает")
         val id = old?.worldId ?: worldId ?: WorldManifest.newWorldId()
         val sourceRoot = source.toAbsolutePath().normalize()
+        if (old != null && sourceRoot != work) {
+            val missingPlayers = old.entries.asSequence()
+                .filter { it.type == WorldEntryType.FILE }
+                .map { it.path }
+                .filter { it.endsWith(".dat") && (it.startsWith("playerdata/") || it.startsWith("players/data/")) }
+                .map { it.substringAfterLast('/') }
+                .distinct()
+                .filter { name ->
+                    !Files.isRegularFile(sourceRoot.resolve("playerdata").resolve(name), NOFOLLOW_LINKS) &&
+                        !Files.isRegularFile(sourceRoot.resolve("players/data").resolve(name), NOFOLLOW_LINKS)
+                }.take(3).toList()
+            if (missingPlayers.isNotEmpty()) {
+                throw IOException("Исходный мир не содержит файлы игроков ${missingPlayers.joinToString()}; " +
+                    "публикация могла бы удалить их данные. Используйте полную копию мира или рабочий каталог $work")
+            }
+        }
         val manifest = WorldScanner.scan(sourceRoot, id, old?.versionId)
-        if (old != null && old.treeHash == manifest.treeHash) return@locked old
+        if (old != null && old.treeHash == manifest.treeHash) return old
         for (entry in manifest.entries.filter { it.type == WorldEntryType.FILE }) {
             Files.newInputStream(sourceRoot.resolve(entry.path), NOFOLLOW_LINKS).use { input ->
                 for (block in entry.blocks) {
@@ -117,7 +188,7 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
             writeMarker(active, manifest.versionId)
         }
         else activate(manifest, old, allowBranch = false)
-        manifest
+        return manifest
     }
 
     /** Переносит только отсутствующие объекты из другой локальной базы. */
