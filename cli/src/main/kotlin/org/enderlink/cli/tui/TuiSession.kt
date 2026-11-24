@@ -87,7 +87,7 @@ internal class TuiSession(
                     val options = operations.options(spec.name, arguments, state.repository, state.profile)
                     val path = Path.of(requireNotNull(options.repository)).toAbsolutePath().normalize()
                     if (options.iroh) requireExistingProfile(Path.of(requireNotNull(options.profile)))
-                    if (spec.name !in setOf("world-publish", "world-receive")) requireRepository(path)
+                    if (spec.name !in setOf("world-publish", "world-receive") || !isUnusedRepositoryPath(path)) requireRepository(path)
                     operations.execute(options, report, control)
                     val repository = WorldRepository(path)
                     state.copy(repository = path, world = readWorld(path), versionIds = repository.versions().map { it.versionId },
@@ -123,7 +123,7 @@ internal class TuiSession(
 }
 
 private fun readWorldStatus(path: Path): String {
-    if (!Files.exists(path, NOFOLLOW_LINKS)) return "Новое хранилище. Создастся при публикации или приёме."
+    if (isUnusedRepositoryPath(path)) return "Новое хранилище. Создастся при публикации или приёме."
     requireRepository(path)
     val repository = WorldRepository(path)
     val current = repository.current() ?: return "В хранилище нет опубликованной версии."
@@ -136,6 +136,9 @@ private fun requireRepository(path: Path) {
         Files.isDirectory(path.resolve(it), NOFOLLOW_LINKS)
     }) { "Это не хранилище EnderLink: $path" }
 }
+
+private fun isUnusedRepositoryPath(path: Path): Boolean = !Files.exists(path, NOFOLLOW_LINKS) ||
+    Files.isDirectory(path, NOFOLLOW_LINKS) && Files.newDirectoryStream(path).use { !it.iterator().hasNext() }
 
 private fun readProfileStatus(path: Path): Pair<String, Map<String, String>> {
     requireExistingProfile(path)
