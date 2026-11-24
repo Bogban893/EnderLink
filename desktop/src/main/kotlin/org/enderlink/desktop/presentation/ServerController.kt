@@ -45,7 +45,7 @@ internal class ServerController(
             closeAfterServerStop = false
             if (server?.isRunning() == false) {
                 server = null
-                view.serverScreen.serverStatus.text = "Сервер остановлен · проверьте журнал в $sessionDirectory"
+                view.serverScreen.serverStatus.text = messages.text("server.stoppedCheckLog", sessionDirectory)
             }
             view.serverScreen.stopButton.isEnabled = isRunning
         }
@@ -72,9 +72,9 @@ internal class ServerController(
         }) { (session, instance) ->
             sessionDirectory = session
             server = instance
-            view.serverScreen.serverStatus.text = "Сервер работает · ${instance.versionId.take(18)}…"
+            view.serverScreen.serverStatus.text = messages.text("server.running", instance.versionId.take(18))
             view.serverScreen.stopButton.isEnabled = true
-            view.status("Сервер запущен · журнал: $session/enderlink-server.log")
+            view.status(messages.text("server.started", session.resolve("enderlink-server.log")))
         }
     }
 
@@ -101,7 +101,7 @@ internal class ServerController(
             server = null
             stoppingServer = false
             view.serverScreen.serverStatus.text = messages.text("server.saved")
-            view.status("Новая версия опубликована · ${shortId(version)}")
+            view.status(messages.text("server.versionPublished", shortId(version)))
             refreshStatus()
             if (closeAfterServerStop) view.dispose()
         }
@@ -115,7 +115,7 @@ internal class ServerController(
         jobs.run(messages.text("server.exited"), { instance.publishStopped() }) { version ->
             server = null; stoppingServer = false
             view.serverScreen.serverStatus.text = messages.text("server.saved")
-            view.status("Мир сервера опубликован · ${shortId(version)}")
+            view.status(messages.text("server.worldPublished", shortId(version)))
             refreshStatus()
         }
     }

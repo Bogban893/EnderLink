@@ -22,9 +22,9 @@ internal class DesktopDialogs(private val parent: Component) {
     ) == JOptionPane.YES_OPTION
 
     fun confirmIncomingVersion(local: String?, incoming: String): Boolean = JOptionPane.showConfirmDialog(parent,
-        "Входящая версия ${shortId(incoming)} сохранена.\n" +
-            "Активная версия ${local?.let(::shortId) ?: messages.text("conflict.noActiveVersion")}.\n\n" +
-            "Переключиться на входящую ветку?", messages.text("conflict.title"), JOptionPane.YES_NO_OPTION,
+        messages.text("conflict.confirmIncoming", shortId(incoming),
+            local?.let(::shortId) ?: messages.text("conflict.noActiveVersion")),
+        messages.text("conflict.title"), JOptionPane.YES_NO_OPTION,
     ) == JOptionPane.YES_OPTION
 
     fun chooseDirectory(current: String): String? {

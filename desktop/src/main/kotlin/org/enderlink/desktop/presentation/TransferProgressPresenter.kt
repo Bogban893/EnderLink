@@ -21,7 +21,7 @@ internal class TransferProgressPresenter(private val send: SendScreen, private v
             val bar = if (receiving) receive.receiveProgress else send.sendProgress
             val text = if (receiving) receive.receiveProgressText else send.sendProgressText
             bar.value = value
-            text.text = "${size(done)} из ${size(total)} · ${value / 10}%"
+            text.text = messages.text("transfer.progress", size(done), size(total), (value / 10).toString())
         }
     }
 

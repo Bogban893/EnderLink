@@ -76,7 +76,7 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
         if (receiving) {
             return TcpListener.open(target.port).use { listener ->
                 track(listener)
-                message("Ожидание подключения на порту ${listener.port}…")
+                message(messages.text("transfer.waiting", listener.port.toString()))
                 listener.accept().use { connection ->
                     track(connection)
                     connection.readTimeoutMs = 300_000
@@ -85,7 +85,7 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
             }
         }
         require(target.host.isNotBlank()) { messages.text("transfer.recipientAddress.required") }
-        message("Подключаемся к ${target.host}:${target.port}…")
+        message(messages.text("transfer.connecting", target.host, target.port.toString()))
         return TcpConnection.connect(Endpoint(target.host, target.port)).use { connection ->
             track(connection)
             connection.readTimeoutMs = 300_000

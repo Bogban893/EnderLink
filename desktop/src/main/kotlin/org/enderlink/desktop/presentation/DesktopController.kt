@@ -90,8 +90,8 @@ internal class DesktopController(
         jobs.run(messages.text("transfer.sending"), cancellable = true, {
             operations.send(repository, source, target, ::statusAsync, progress::update)
         }) { result ->
-            view.status("Мир передан и подтверждён · ${shortId(result.versionId)}")
-            view.sendScreen.sendProgressText.text = "Готово · передано ${size(result.transferredBytes)}, повторно использовано ${size(result.reusedBytes)}"
+            view.status(messages.text("transfer.sent", shortId(result.versionId)))
+            view.sendScreen.sendProgressText.text = messages.text("transfer.sentSummary", size(result.transferredBytes), size(result.reusedBytes))
             refreshStatus()
         }
     }
@@ -108,7 +108,7 @@ internal class DesktopController(
             if (repository.current() == null) {
                 statusAsync(messages.text("transfer.comparing"))
                 val cached = MinecraftSaves.cacheExisting(repository, saves.first, saves.second)
-                if (cached > 0) statusAsync("Повторно используем $cached блоков существующего мира")
+                if (cached > 0) statusAsync(messages.text("transfer.cached", cached.toString()))
             }
             if (operations.wasCancelled) throw InterruptedException(messages.text("status.cancelled"))
             val result = operations.receive(repository, target, ::statusAsync, progress::update)
@@ -119,13 +119,12 @@ internal class DesktopController(
             statusAsync(messages.text("transfer.installing"))
             val installed = try { MinecraftSaves.install(repository, saves.first, saves.second, result.parentFingerprint) }
             catch (error: Exception) {
-                throw IOException("Мир получен в EnderLink, но не добавлен в Minecraft: ${error.message}. " +
-                    "Закройте мир и нажмите «Обновить Minecraft».", error)
+                throw IOException(messages.text("minecraft.receivedInstallFailed", error.message), error)
             }
             result to installed
         }) { (result, installed) ->
-            view.status("Мир принят · ${shortId(result.versionId)}")
-            view.receiveScreen.receiveProgressText.text = "Готово · получено ${size(result.transferredBytes)}, в Minecraft: ${installed.directory.fileName}"
+            view.status(messages.text("transfer.received", shortId(result.versionId)))
+            view.receiveScreen.receiveProgressText.text = messages.text("transfer.receivedSummary", size(result.transferredBytes), installed.directory.fileName)
             refreshStatus()
         }
     }
@@ -147,8 +146,8 @@ internal class DesktopController(
         jobs.run(messages.text("minecraft.installing"), {
             MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint)
         }) { installed ->
-            view.status("Мир Minecraft обновлён · ${installed.directory}")
-            view.receiveScreen.receiveProgressText.text = "В Minecraft: ${installed.directory} · изменено ${installed.replacedFiles} файлов"
+            view.status(messages.text("minecraft.updated", installed.directory))
+            view.receiveScreen.receiveProgressText.text = messages.text("minecraft.updatedSummary", installed.directory, installed.replacedFiles.toString())
         }
     }
 
@@ -170,7 +169,7 @@ internal class DesktopController(
         val name = view.friendsScreen.friendName.text.trim(); val id = view.friendsScreen.friendId.text.trim()
         jobs.run(messages.text("friends.saving"), { IrohProfile.open().use { it.add(name, id) } }) {
             view.friendsScreen.friendName.text = ""; view.friendsScreen.friendId.text = ""
-            view.status("Друг $name добавлен")
+            view.status(messages.text("friends.added", name))
             refreshFriends()
         }
     }
@@ -184,7 +183,7 @@ internal class DesktopController(
         }
         val repository = repository() ?: return
         jobs.run(messages.text("player.importing"), { repository.importLegacyPlayer(owner) }) { manifest ->
-            view.status("Вещи владельца перенесены · ${shortId(manifest.versionId)}")
+            view.status(messages.text("player.imported", shortId(manifest.versionId)))
             refreshStatus()
         }
     }
@@ -200,7 +199,7 @@ internal class DesktopController(
             if (previousReceive in friends) view.receiveScreen.friendReceive.selectedItem = previousReceive
             view.friendsScreen.friendsList.text = if (friends.isEmpty()) messages.text("friends.empty") else
                 "<html>" + friends.keys.joinToString("<br>") { "<span style='color:#84be60'>◆</span>  $it" } + "</html>"
-            view.status("Профиль готов · друзей: ${friends.size}")
+            view.status(messages.text("friends.ready", friends.size.toString()))
         }
     }
 
@@ -216,14 +215,14 @@ internal class DesktopController(
             val player = if (current == null) null else PlayerDataInspector.inspect(repo.workingDirectory)
             Triple(repo, current, player)
         }) { (repo, current, player) ->
-            view.homeScreen.statusWorld.text = if (current == null) messages.text("repository.empty") else "Версия ${shortId(current.versionId)}"
+            view.homeScreen.statusWorld.text = if (current == null) messages.text("repository.empty") else messages.text("repository.version", shortId(current.versionId))
             view.homeScreen.statusDetail.text = if (current == null) messages.text("repository.sourceHint") else
-                "Рабочая копия: ${repo.workingDirectory}"
+                messages.text("repository.workingDirectory", repo.workingDirectory)
             view.homeScreen.playerHint.text = when {
                 player == null -> ""
                 player.legacyEmbeddedPlayer -> messages.text("player.legacyHint")
                 player.singleplayerUuid && player.modernPlayerFiles == 0 -> messages.text("player.modernMissingHint")
-                else -> "Файлов игроков: ${player.legacyPlayerFiles + player.modernPlayerFiles}"
+                else -> messages.text("player.fileCount", (player.legacyPlayerFiles + player.modernPlayerFiles).toString())
             }
             view.status(messages.text("repository.updated"))
             if (view.friendsScreen.ownId.text.isBlank()) refreshFriends()
@@ -234,7 +233,7 @@ internal class DesktopController(
         val path = view.repositoryField.text.trim().takeIf(String::isNotEmpty)?.let { runCatching { Path.of(it) }.getOrNull() }?.resolve("world")
         if (path == null || !Files.isDirectory(path)) { dialogs.warning(messages.text("repository.workMissing")); return }
         runCatching { java.awt.Desktop.getDesktop().open(path.toFile()) }
-            .onFailure { dialogs.warning("Не удалось открыть папку: ${it.message}") }
+            .onFailure { dialogs.warning(messages.text("repository.openFolderFailed", it.message)) }
     }
 
     private fun repository(): WorldRepository? {
@@ -256,7 +255,7 @@ internal class DesktopController(
             return
         }
         val message = failure.message ?: failure.javaClass.simpleName
-        view.status("Ошибка: $message")
+        view.status(messages.text("status.error", message))
         dialogs.error(message)
     }
 

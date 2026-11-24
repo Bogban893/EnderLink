@@ -86,7 +86,7 @@ object MinecraftSaves {
             lock.use {
                 recover(repository, target, stage, backup, marker, pending)
                 if (Files.exists(target, NOFOLLOW_LINKS) && !Files.isDirectory(target, NOFOLLOW_LINKS)) {
-                    throw IOException("Путь мира уже занят файлом или ссылкой: $target")
+                    throw IOException(messages.text("minecraft.targetOccupied", target))
                 }
                 val previous = findPrevious(repository, target, marker, incoming, parentFingerprint)
                 val oldEntries = previous?.entries.orEmpty().filterNot(::isSessionLock).associateBy { it.path }
@@ -141,7 +141,7 @@ object MinecraftSaves {
         parentFingerprint: ParentFingerprint?,
     ): WorldManifest? {
         if (!Files.exists(target, NOFOLLOW_LINKS)) {
-            if (Files.exists(marker, NOFOLLOW_LINKS)) throw IOException("Файл учёта есть, а папка мира исчезла: $target")
+            if (Files.exists(marker, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.targetMissing", target))
             return null
         }
         if (Files.isSymbolicLink(target)) throw IOException(messages.text("minecraft.worldSymlink"))
@@ -162,7 +162,7 @@ object MinecraftSaves {
         val candidates = listOfNotNull(incoming, incoming.parentVersionId?.let { runCatching { repository.load(it) }.getOrNull() })
         return candidates.firstOrNull { matches(target, it) }
             ?: matchingFingerprint(target, incoming, parentFingerprint)
-            ?: throw IOException("Папка $target уже содержит другой мир. Выберите другое имя или сохраните его отдельно")
+            ?: throw IOException(messages.text("minecraft.unrelatedTarget", target))
     }
 
     private fun matchingFingerprint(
@@ -180,7 +180,7 @@ object MinecraftSaves {
     private fun recover(repository: WorldRepository, target: Path, stage: Path, backup: Path, marker: Path, pending: Path) {
         val transaction = if (Files.exists(pending, NOFOLLOW_LINKS)) readMarker(repository, pending) else null
         if (Files.exists(backup, NOFOLLOW_LINKS)) {
-            if (!Files.isDirectory(backup, NOFOLLOW_LINKS)) throw IOException("Некорректная резервная копия мира: $backup")
+            if (!Files.isDirectory(backup, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidBackup", backup))
             if (!Files.exists(target, NOFOLLOW_LINKS)) {
                 move(backup, target)
                 Files.deleteIfExists(pending)
@@ -192,7 +192,7 @@ object MinecraftSaves {
                 deleteTree(backup)
                 Files.deleteIfExists(pending)
             } else {
-                throw IOException("Незавершённое обновление мира: сохраните папки $target и $backup перед повтором")
+                throw IOException(messages.text("minecraft.interruptedUpdate", target, backup))
             }
         } else if (transaction != null) {
             if (Files.exists(target, NOFOLLOW_LINKS) && matches(target, transaction)) writeMarker(marker, transaction)
@@ -202,9 +202,9 @@ object MinecraftSaves {
     }
 
     private fun readMarker(repository: WorldRepository, path: Path): WorldManifest {
-        if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException("Некорректный файл учёта мира: $path")
+        if (!Files.isRegularFile(path, NOFOLLOW_LINKS)) throw IOException(messages.text("minecraft.invalidMarkerPath", path))
         val properties = Properties().apply { Files.newInputStream(path).use(::load) }
-        val manifest = repository.load(properties.getProperty("versionId") ?: throw IOException("Нет ID версии в $path"))
+        val manifest = repository.load(properties.getProperty("versionId") ?: throw IOException(messages.text("minecraft.markerVersionMissing", path)))
         if (manifest.worldId != properties.getProperty("worldId")) throw IOException(messages.text("minecraft.worldIdMismatch"))
         return manifest
     }
@@ -241,12 +241,12 @@ object MinecraftSaves {
         try {
             Files.walkFileTree(source, object : SimpleFileVisitor<Path>() {
                 override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isDirectory) throw IOException("Необычный каталог мира: $dir")
+                    if (!attrs.isDirectory) throw IOException(messages.text("minecraft.unusualDirectory", dir))
                     if (dir != source) Files.createDirectory(destination.resolve(source.relativize(dir)))
                     return FileVisitResult.CONTINUE
                 }
                 override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isRegularFile) throw IOException("Ссылки в мире не поддерживаются: $file")
+                    if (!attrs.isRegularFile) throw IOException(messages.text("minecraft.unsupportedLink", file))
                     Files.copy(file, destination.resolve(source.relativize(file)), NOFOLLOW_LINKS)
                     return FileVisitResult.CONTINUE
                 }
