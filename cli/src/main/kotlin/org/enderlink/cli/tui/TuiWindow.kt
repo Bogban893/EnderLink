@@ -6,10 +6,12 @@ import com.googlecode.lanterna.gui2.BorderLayout
 import com.googlecode.lanterna.gui2.Direction
 import com.googlecode.lanterna.gui2.EmptySpace
 import com.googlecode.lanterna.gui2.GridLayout
+import com.googlecode.lanterna.gui2.Interactable
 import com.googlecode.lanterna.gui2.Label
 import com.googlecode.lanterna.gui2.LinearLayout
 import com.googlecode.lanterna.gui2.Panel
 import com.googlecode.lanterna.gui2.TextBox
+import com.googlecode.lanterna.gui2.TextGUIGraphics
 import com.googlecode.lanterna.gui2.Window
 import com.googlecode.lanterna.gui2.dialogs.ActionListDialogBuilder
 import com.googlecode.lanterna.graphics.SimpleTheme
@@ -27,6 +29,9 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
     private var busy = false
     private var renderedTheme: TuiThemeId? = null
     private val buttons = mutableListOf<TuiButton>()
+    private val mainContent = Panel(BorderLayout())
+    private val sizeWarning = Label("")
+    private var savedFocus: Interactable? = null
     private var focusCommandAfterInput = false
     private val world = TextBox(TerminalSize(30, 2), TextBox.Style.MULTI_LINE).setReadOnly(true)
     private val friends = TextBox(TerminalSize(30, 2), TextBox.Style.MULTI_LINE).setReadOnly(true)
@@ -39,7 +44,7 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
 
     init {
         setHints(listOf(Window.Hint.FULL_SCREEN))
-        val root = Panel(BorderLayout())
+        val root = mainContent
         fun grid(columns: Int) = GridLayout(columns).setLeftMarginSize(0).setRightMarginSize(0)
             .setTopMarginSize(0).setBottomMarginSize(0).setVerticalSpacing(0).setHorizontalSpacing(1)
         val body = Panel(TuiSplitLayout(Direction.VERTICAL))
@@ -78,7 +83,33 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
         focusedInteractable = commandInput
     }
 
+    override fun draw(graphics: TextGUIGraphics) {
+        val area = textGUI?.screen?.terminalSize ?: graphics.size
+        val tooSmall = area.columns < MINIMUM_SIZE.columns || area.rows < MINIMUM_SIZE.rows
+        if (tooSmall) {
+            if (component !== sizeWarning) {
+                savedFocus = focusedInteractable
+                buttons.forEach { it.hovered = false }
+                component = sizeWarning
+            }
+            sizeWarning.text = "Минимум: ${MINIMUM_SIZE.columns}×${MINIMUM_SIZE.rows}\n" +
+                "Сейчас: ${area.columns}×${area.rows}\nУвеличьте окно терминала.\nF10 / Ctrl+Q — выход"
+        } else if (component !== mainContent) {
+            component = mainContent
+            focusedInteractable = savedFocus ?: commandInput
+            savedFocus = null
+        }
+        super.draw(graphics)
+    }
+
     override fun handleInput(key: KeyStroke): Boolean {
+        if (key.keyType == KeyType.F10 || key.keyType == KeyType.EOF ||
+            key.isCtrlDown && key.character?.lowercaseChar() == 'q') {
+            submit("exit")
+            return true
+        }
+        // Hidden controls must not receive keystrokes or clicks while the terminal is too small.
+        if (component === sizeWarning) return true
         if (key is MouseAction && key.actionType == MouseActionType.MOVE) {
             for (button in buttons) {
                 val origin = button.globalPosition
@@ -86,13 +117,8 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
                     key.position.row in origin.row until origin.row + button.size.rows
             }
         }
-        if (key.isCtrlDown && key.character?.lowercaseChar() == 'q') {
-            submit("exit")
-            return true
-        }
         when (key.keyType) {
             KeyType.F2 -> { focusedInteractable = commandInput; return true }
-            KeyType.F10, KeyType.EOF -> { submit("exit"); return true }
             else -> {
                 val handled = super.handleInput(key)
                 // Container mouse dispatch restores focus to the clicked button after its action.
@@ -171,5 +197,9 @@ internal class TuiWindow(private val session: TuiSession = TuiSession()) : Basic
         alive.set(false)
         worker.shutdownNow()
         super.close()
+    }
+
+    private companion object {
+        val MINIMUM_SIZE = TerminalSize(80, 24)
     }
 }

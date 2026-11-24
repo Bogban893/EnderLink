@@ -1,6 +1,7 @@
 package org.enderlink.cli.tui
 
 import com.googlecode.lanterna.TerminalSize
+import com.googlecode.lanterna.TerminalPosition
 import com.googlecode.lanterna.TextColor
 import com.googlecode.lanterna.gui2.Component
 import com.googlecode.lanterna.gui2.Container
@@ -22,6 +23,70 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class TuiWindowTest {
+    @Test
+    fun `small terminals show size warning and restore data draft and focus`() = withGui { terminal, screen, gui, window ->
+        val content = window.component
+        val result = content.descendants().filterIsInstance<TextBox>().filter { it.isReadOnly }.last()
+        result.text = "Результат предыдущей команды"
+        window.commandInput.replaceLine("repository \"Мой мир\"")
+        val button = content.descendants().filterIsInstance<TuiButton>().first()
+        window.focusedInteractable = button
+        gui.updateScreen()
+        val buttonPosition = button.globalPosition
+        for (size in listOf(TerminalSize(79, 24), TerminalSize(80, 23), TerminalSize(30, 10), TerminalSize(1, 1))) {
+            terminal.setTerminalSize(size)
+            screen.doResizeIfNecessary()
+            gui.updateScreen()
+            if (size.columns >= 30) {
+                assertEquals("М", terminal.getCharacter(window.toGlobalFromContentRelative(TerminalPosition.TOP_LEFT_CORNER)).characterString)
+                val text = buildString {
+                    for (row in 0 until size.rows) {
+                        for (column in 0 until size.columns) append(terminal.getCharacter(column, row).characterString)
+                        append('\n')
+                    }
+                }
+                assertTrue(text.contains("Минимум: 80×24"))
+                assertTrue(text.contains("Сейчас: ${size.columns}×${size.rows}"))
+            }
+            assertNull(gui.cursorPosition)
+            gui.handleInput(KeyStroke(KeyType.F2))
+            gui.handleInput(KeyStroke('x', false, false))
+            gui.handleInput(KeyStroke(KeyType.Enter))
+            gui.handleInput(MouseAction(MouseActionType.CLICK_DOWN, 1, buttonPosition))
+            gui.handleInput(MouseAction(MouseActionType.CLICK_RELEASE, 1, buttonPosition))
+            assertEquals("repository \"Мой мир\"", window.commandInput.text)
+
+            terminal.setTerminalSize(TerminalSize(80, 24))
+            screen.doResizeIfNecessary()
+            gui.updateScreen()
+            assertSame(content, window.component)
+            assertSame(button, window.focusedInteractable)
+            assertEquals("Результат предыдущей команды", result.text)
+            assertEquals("repository \"Мой мир\"", window.commandInput.text)
+        }
+    }
+
+    @Test
+    fun `starting small restores command input when enlarged`() = withGui(initialSize = TerminalSize(30, 10)) { terminal, screen, gui, window ->
+        assertEquals("М", terminal.getCharacter(window.toGlobalFromContentRelative(TerminalPosition.TOP_LEFT_CORNER)).characterString)
+        assertNull(gui.cursorPosition)
+        terminal.setTerminalSize(TerminalSize(80, 24))
+        screen.doResizeIfNecessary()
+        gui.updateScreen()
+        assertSame(window.commandInput, window.focusedInteractable)
+        assertEquals(3, window.component.descendants().filterIsInstance<TextBox>().count { it.isReadOnly })
+    }
+
+    @Test
+    fun `exit shortcuts work below minimum size`() {
+        for (key in listOf(KeyStroke(KeyType.F10), KeyStroke('q', true, false))) {
+            withGui(initialSize = TerminalSize(30, 10)) { _, _, gui, window ->
+                assertTrue(gui.handleInput(key))
+                assertFalse(gui.windows.contains(window))
+            }
+        }
+    }
+
     @Test
     fun `theme button opens chooser and applies selected theme`() = withGui { terminal, _, gui, window ->
         val button = window.component.descendants().filterIsInstance<TuiButton>().first { it.label == "Тема" }
@@ -181,8 +246,8 @@ class TuiWindowTest {
         assertTrue(ready())
     }
 
-    private fun withGui(session: TuiSession = TuiSession(), test: (DefaultVirtualTerminal, TerminalScreen, MultiWindowTextGUI, TuiWindow) -> Unit) {
-        DefaultVirtualTerminal(TerminalSize(100, 32)).use { terminal ->
+    private fun withGui(session: TuiSession = TuiSession(), initialSize: TerminalSize = TerminalSize(100, 32), test: (DefaultVirtualTerminal, TerminalScreen, MultiWindowTextGUI, TuiWindow) -> Unit) {
+        DefaultVirtualTerminal(initialSize).use { terminal ->
             TerminalScreen(terminal).use { screen ->
                 screen.startScreen()
                 val gui = MultiWindowTextGUI(screen).apply { theme = TuiTheme.create() }
