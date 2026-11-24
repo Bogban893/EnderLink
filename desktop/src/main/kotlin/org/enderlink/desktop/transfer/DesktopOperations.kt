@@ -52,11 +52,16 @@ class DesktopOperations(private val profileDirectory: Path = IrohProfile.default
         owner: UUID? = null,
         guest: UUID? = null,
     ): WorldTransferStats {
-        if (source != null) {
+        if (source != null || owner != null && guest != null) {
             message(messages.text("transfer.publishing"))
             try {
-                MinecraftSaves.requireClosed(source)
-                if (owner == null) repository.publish(source) else repository.publishSingleplayer(source, owner, guest)
+                if (source != null) {
+                    MinecraftSaves.requireClosed(source)
+                    if (owner == null) repository.publish(source) else repository.publishSingleplayer(source, owner, guest)
+                } else {
+                    MinecraftSaves.requireClosed(repository.workingDirectory)
+                    repository.preparePublishedLanOwner(requireNotNull(owner), requireNotNull(guest))
+                }
             }
             catch (error: IOException) { throw WorldPublicationException(error) }
         }

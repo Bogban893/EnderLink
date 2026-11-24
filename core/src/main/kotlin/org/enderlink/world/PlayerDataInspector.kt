@@ -123,6 +123,15 @@ object PlayerDataInspector {
         synchronizeProfile(world, modern, owner, guest)
     }
 
+    internal fun hasSingleplayerOwner(world: Path, owner: UUID): Boolean {
+        val raw = readLevel(world)
+        val uuidTag = findDataTag(raw, "singleplayer_uuid")
+        if (uuidTag != null) return readUuid(raw, uuidTag) == owner
+        if (findDataTag(raw, "Player") == null) return false
+        val profile = profilePath(world, false, "data", owner, ".dat")
+        return Files.isRegularFile(profile, NOFOLLOW_LINKS) && readGzip(profile).contentEquals(extractLegacyPlayer(world))
+    }
+
     /** Copies the LAN guest's latest state into their host profile in a private installation copy. */
     private fun restoreLanOwner(world: Path, owner: UUID, guest: UUID) {
         val modern = inspect(world).singleplayerUuid

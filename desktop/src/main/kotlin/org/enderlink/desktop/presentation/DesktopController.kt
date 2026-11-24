@@ -135,7 +135,8 @@ internal class DesktopController(
         }
         val target = target(view.sendScreen.sendRoute, view.sendScreen.friendSend, view.sendScreen.sendHost, view.sendScreen.sendPort) ?: return
         val repository = repository() ?: return
-        val identity = if (source != null) selectedPlayer(view.sendScreen.ownerField) ?: return else null
+        val identity = if (source != null || view.sendScreen.lanNameField.text.isNotBlank())
+            selectedPlayer(view.sendScreen.ownerField) ?: return else null
         val owner = identity?.first
         val guest = identity?.second
         if (owner != null) ownerUuid = owner.toString()

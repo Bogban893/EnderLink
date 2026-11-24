@@ -116,8 +116,23 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
             throw IOException("Для публикации владельца выберите закрытый мир вне хранилища EnderLink")
         }
         val original = WorldScanner.scan(sourceRoot, readActive()?.worldId ?: WorldManifest.newWorldId())
+        publishPreparedSingleplayer(sourceRoot, owner, guest, original)
+    }
+
+    /** Applies an explicitly linked LAN identity to a verified published snapshot owned by this sender. */
+    fun preparePublishedLanOwner(owner: UUID, guest: UUID): WorldManifest = locked {
+        recoverLocked()
+        val current = readActive() ?: throw IOException("Сначала опубликуйте мир")
+        if (!matchesWorking(current)) throw IOException("Рабочая копия мира отличается от опубликованной версии")
+        if (!PlayerDataInspector.hasSingleplayerOwner(work, owner)) return@locked current
+        publishPreparedSingleplayer(work, owner, guest, current)
+    }
+
+    private fun publishPreparedSingleplayer(
+        sourceRoot: Path, owner: UUID, guest: UUID?, original: WorldManifest,
+    ): WorldManifest {
         val prepared = Files.createTempDirectory(meta, "owner-")
-        try {
+        return try {
             Files.walkFileTree(sourceRoot, object : SimpleFileVisitor<Path>() {
                 override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
                     if (!attrs.isDirectory) throw IOException("Мир содержит ссылку или необычный каталог: $dir")
@@ -130,7 +145,7 @@ class WorldRepository internal constructor(base: Path, private val objectOutput:
                     return FileVisitResult.CONTINUE
                 }
             })
-            if (WorldScanner.scan(prepared, original.worldId).entries != original.entries) {
+            if (WorldScanner.scan(prepared, original.worldId, formatVersion = original.formatVersion).entries != original.entries) {
                 throw IOException("Мир изменился во время подготовки владельца")
             }
             PlayerDataInspector.captureSingleplayerOwner(prepared, owner, guest)

@@ -2,13 +2,25 @@ package org.enderlink.desktop.minecraft
 
 import org.enderlink.world.PlayerDataInspector
 import org.enderlink.world.WorldRepository
+import org.enderlink.world.WorldManifest
+import org.enderlink.world.WorldObjectRef
+import org.enderlink.world.WorldScanner
+import org.enderlink.desktop.transfer.DesktopOperations
+import org.enderlink.desktop.transfer.Route
+import org.enderlink.desktop.transfer.TransferTarget
+import org.enderlink.desktop.i18n.messages
+import org.enderlink.worldtransfer.WorldTransferStats
 import org.junit.jupiter.api.io.TempDir
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.IOException
+import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import kotlin.test.Test
@@ -152,6 +164,93 @@ class LanPlayerProfilesTest {
         assertTrue(Files.notExists(repo.workingDirectory.resolve("players/stats/$guestA.json")))
         assertTrue(Files.notExists(repo.workingDirectory.resolve("players/advancements/$guestA.json")))
         assertProfile(source, true, guestA, "minecraft:apple")
+    }
+
+    @Test
+    fun `sending an imported version without a source prepares LAN profile before transfer`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(source, true, hostB, "minecraft:emerald")
+        writeProfile(source, true, hostB, "minecraft:emerald")
+        writeProfile(source, true, guestA, "minecraft:diamond")
+        writeProfile(source, true, guestB, "minecraft:apple")
+        val sender = WorldRepository(root.resolve("sender"))
+        val first = sender.publishSingleplayer(source, hostB)
+        val receiver = WorldRepository(root.resolve("receiver"))
+        val port = ServerSocket(0).use { it.localPort }
+        val waiting = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val incoming = executor.submit<WorldTransferStats> {
+                DesktopOperations(root.resolve("receiver-profile")).receive(receiver,
+                    TransferTarget(Route.LOCAL, port = port),
+                    { if (it == messages.text("transfer.waiting", port.toString())) waiting.countDown() }, { _, _ -> })
+            }
+            assertTrue(waiting.await(5, TimeUnit.SECONDS))
+            DesktopOperations(root.resolve("sender-profile")).send(sender, null,
+                TransferTarget(Route.LOCAL, host = "127.0.0.1", port = port), {}, { _, _ -> }, hostB, guestB)
+            assertEquals(sender.current()?.versionId, incoming.get(5, TimeUnit.SECONDS).versionId)
+            assertEquals(first.versionId, sender.current()?.parentVersionId)
+            assertProfile(receiver.workingDirectory, true, guestB, "minecraft:emerald")
+            assertProfile(receiver.workingDirectory, true, guestA, "minecraft:diamond")
+            assertProfile(source, true, guestB, "minecraft:apple")
+        } finally { executor.shutdownNow() }
+    }
+
+    @Test
+    fun `preparing an already published LAN profile is idempotent and preserves other host state`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(source, true, hostB, "minecraft:emerald")
+        writeProfile(source, true, hostB, "minecraft:emerald")
+        writeProfile(source, true, hostA, "minecraft:diamond")
+        writeProfile(source, true, guestA, "minecraft:gold_ingot")
+        val repo = WorldRepository(root.resolve("repository"))
+        val first = repo.publishSingleplayer(source, hostB)
+        assertEquals(first, repo.preparePublishedLanOwner(hostA, guestA))
+        assertProfile(repo.workingDirectory, true, hostA, "minecraft:diamond")
+        assertProfile(repo.workingDirectory, true, guestA, "minecraft:gold_ingot")
+        val prepared = repo.preparePublishedLanOwner(hostB, guestB)
+        assertProfile(repo.workingDirectory, true, guestB, "minecraft:emerald")
+        assertEquals(prepared, repo.preparePublishedLanOwner(hostB, guestB))
+        writeProfile(repo.workingDirectory, true, hostB, "minecraft:apple")
+        assertFailsWith<IOException> { repo.preparePublishedLanOwner(hostB, guestB) }
+        assertEquals(prepared.versionId, repo.current()?.versionId)
+    }
+
+    @Test
+    fun `sending an imported legacy snapshot can prepare its explicit LAN owner`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(source, false, hostB, "minecraft:emerald")
+        writeProfile(source, false, hostB, "minecraft:emerald")
+        val repo = WorldRepository(root.resolve("repository"))
+        repo.publishSingleplayer(source, hostB)
+        repo.preparePublishedLanOwner(hostB, guestB)
+        assertProfile(repo.workingDirectory, false, guestB, "minecraft:emerald")
+        assertContentEquals(player(hostB, "minecraft:emerald"), PlayerDataInspector.extractLegacyPlayer(repo.workingDirectory))
+    }
+
+    @Test
+    fun `LAN preparation preserves history when upgrading a format one repository`() {
+        val source = Files.createDirectory(root.resolve("source"))
+        writeLevel(source, true, hostB, "minecraft:emerald")
+        writeProfile(source, true, hostB, "minecraft:emerald")
+        val repo = WorldRepository(root.resolve("repository"))
+        val legacy = WorldScanner.scan(source, WorldManifest.newWorldId(), formatVersion = 1)
+        repo.record(legacy)
+        for (entry in legacy.entries.filter { it.hash != null }) {
+            Files.newInputStream(source.resolve(entry.path)).use {
+                repo.storeObject(WorldObjectRef(checkNotNull(entry.hash), entry.size), it)
+            }
+        }
+        repo.activate(legacy)
+        val next = repo.preparePublishedLanOwner(hostB, guestB)
+        assertEquals(2, next.formatVersion)
+        assertEquals(legacy.versionId, next.parentVersionId)
+        assertProfile(repo.workingDirectory, true, guestB, "minecraft:emerald")
+        repo.verifyCurrent()
+        repo.checkout(legacy.versionId)
+        assertProfile(repo.workingDirectory, true, hostB, "minecraft:emerald")
+        assertTrue(Files.notExists(dataPath(repo.workingDirectory, true, guestB)))
+        repo.verifyCurrent()
     }
 
     private fun dataPath(world: Path, modern: Boolean, owner: UUID): Path =
