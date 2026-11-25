@@ -4,6 +4,8 @@ import com.formdev.flatlaf.util.SystemFileChooser
 import com.formdev.flatlaf.util.SystemFileChooser.FileNameExtensionFilter
 import org.enderlink.desktop.i18n.messages
 import org.enderlink.desktop.ui.shortId
+import org.enderlink.world.PlayerProfileChoice
+import org.enderlink.world.PlayerProfileConflictException
 import java.awt.Component
 import java.nio.file.Files
 import java.nio.file.Path
@@ -57,6 +59,18 @@ internal class DesktopDialogs(
     }
 
     fun dismissIncomingWorld() { incomingDialog?.dispose() }
+
+    fun choosePlayerProfile(conflict: PlayerProfileConflictException): PlayerProfileChoice? {
+        val options = arrayOf(messages.text("player.chooseOwner"), messages.text("player.chooseLan"), messages.text("action.cancel"))
+        return when (JOptionPane.showOptionDialog(parent,
+            messages.text("player.conflictPrompt", conflict.owner.toString(), conflict.guest.toString()),
+            messages.text("player.conflictTitle"), JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
+            null, options, options[2])) {
+            0 -> PlayerProfileChoice.OWNER
+            1 -> PlayerProfileChoice.LAN
+            else -> null
+        }
+    }
 
     fun confirmLibraryMove(from: String, to: String): Boolean = JOptionPane.showConfirmDialog(parent,
         messages.text("library.confirmMove", from, to), messages.text("library.moveTitle"), JOptionPane.YES_NO_OPTION,

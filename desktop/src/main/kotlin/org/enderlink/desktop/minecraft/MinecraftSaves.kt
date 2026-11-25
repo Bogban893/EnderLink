@@ -5,6 +5,8 @@ import org.enderlink.world.WorldEntry
 import org.enderlink.world.WorldManifest
 import org.enderlink.world.WorldRepository
 import org.enderlink.world.WorldScanner
+import org.enderlink.world.PlayerProfileChoice
+import org.enderlink.world.PlayerProfileConflictException
 import org.enderlink.worldtransfer.ParentFingerprint
 import java.io.IOException
 import java.nio.channels.FileChannel
@@ -118,6 +120,7 @@ object MinecraftSaves {
         parentFingerprint: ParentFingerprint? = null,
         owner: UUID? = null,
         guest: UUID? = null,
+        resolvePlayerConflict: (PlayerProfileConflictException) -> PlayerProfileChoice = { throw it },
     ): MinecraftInstallResult {
         require(guest == null || owner != null) { "Для LAN-профиля нужен UUID владельца" }
         validateName(folderName)
@@ -166,7 +169,7 @@ object MinecraftSaves {
                 if (owner == null && (playerData.legacyEmbeddedPlayer || playerData.singleplayerUuid)) {
                     throw IOException(messages.text("minecraft.ownerRequired"))
                 }
-                if (owner != null) org.enderlink.world.PlayerDataInspector.prepareSingleplayerOwner(stage, owner, guest)
+                if (owner != null) org.enderlink.world.PlayerDataInspector.prepareSingleplayerOwner(stage, owner, guest, resolvePlayerConflict)
                 val installed = InstalledMarker(incoming, if (owner == null) null else contentHash(stage, incoming), owner, guest)
                 // Windows cannot rename directories with open files. Other platforms keep the lock across rename.
                 FileChannel.open(stage.resolve("session.lock"), CREATE, READ, WRITE).use { stageChannel ->

@@ -23,6 +23,8 @@ import org.enderlink.network.TransferDiagnostics
 import org.enderlink.network.TransferRejectedException
 import org.enderlink.network.discovery.DiscoveryClient
 import org.enderlink.world.PlayerDataInspector
+import org.enderlink.world.PlayerProfileChoice
+import org.enderlink.world.PlayerProfileConflictException
 import org.enderlink.world.WorldConflictException
 import org.enderlink.world.WorldRepository
 import org.enderlink.world.WorldEntryType
@@ -37,6 +39,7 @@ import java.nio.file.Path
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JRadioButton
 import javax.swing.SwingUtilities
 
@@ -337,7 +340,10 @@ internal class DesktopController(
             installingMinecraft = true
             SwingUtilities.invokeLater { view.setCanCancel(false) }
             statusAsync(messages.text("transfer.installing"))
-            val installed = try { MinecraftSaves.install(repository, saves.first, saves.second, result.parentFingerprint, owner, guest) }
+            val installed = try {
+                MinecraftSaves.install(repository, saves.first, saves.second, result.parentFingerprint, owner, guest, ::resolvePlayerProfileConflict)
+            }
+            catch (error: InterruptedException) { throw error }
             catch (error: Exception) {
                 throw IOException(messages.text("minecraft.receivedInstallFailed", error.message), error)
             }
@@ -364,6 +370,12 @@ internal class DesktopController(
         return accepted.get() && !operations.wasCancelled
     }
 
+    private fun resolvePlayerProfileConflict(conflict: PlayerProfileConflictException): PlayerProfileChoice {
+        val choice = AtomicReference<PlayerProfileChoice?>()
+        SwingUtilities.invokeAndWait { choice.set(dialogs.choosePlayerProfile(conflict)) }
+        return choice.get() ?: throw InterruptedException(messages.text("status.cancelled"))
+    }
+
     private fun minecraftDestination(): Pair<Path, String>? {
         val path = view.receiveScreen.savesField.text.trim().takeIf(String::isNotEmpty)?.let { raw ->
             runCatching { Path.of(raw) }.getOrElse { dialogs.warning(messages.text("minecraft.saves.invalid")); return null }
@@ -381,7 +393,7 @@ internal class DesktopController(
         ownerUuid = owner.toString()
         saveSettings()
         jobs.run(messages.text("minecraft.installing"), {
-            MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint, owner, guest)
+            MinecraftSaves.install(repository, destination.first, destination.second, lastParentFingerprint, owner, guest, ::resolvePlayerProfileConflict)
         }) { installed ->
             view.status(messages.text("minecraft.updated", installed.directory))
             view.receiveScreen.receiveProgressText.text = messages.text("minecraft.updatedSummary", installed.directory, installed.replacedFiles.toString())

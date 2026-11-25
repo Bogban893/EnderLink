@@ -13,6 +13,7 @@ import java.nio.file.Path
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import java.util.UUID
+import java.security.MessageDigest
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
@@ -121,6 +122,7 @@ object PlayerDataInspector {
                 "Укажите UUID аккаунта, которым открывали этот мир одиночно")
         }
         synchronizeProfile(world, modern, owner, guest)
+        if (owner != guest) PlayerProfileLinks.record(world, owner, guest, requireNotNull(profileFingerprint(world, modern, owner)))
     }
 
     internal fun hasSingleplayerOwner(world: Path, owner: UUID): Boolean {
@@ -132,11 +134,57 @@ object PlayerDataInspector {
         return Files.isRegularFile(profile, NOFOLLOW_LINKS) && readGzip(profile).contentEquals(extractLegacyPlayer(world))
     }
 
-    /** Copies the LAN guest's latest state into their host profile in a private installation copy. */
-    private fun restoreLanOwner(world: Path, owner: UUID, guest: UUID) {
+    /** Resolves changes against the last synchronized pair; old unrelated profiles require an explicit choice. */
+    private fun restoreLanOwner(
+        world: Path, owner: UUID, guest: UUID,
+        resolveConflict: (PlayerProfileConflictException) -> PlayerProfileChoice,
+    ) {
+        if (owner == guest) return
         val modern = inspect(world).singleplayerUuid
-        val source = profilePath(world, modern, "data", guest, ".dat")
-        if (Files.exists(source, NOFOLLOW_LINKS)) synchronizeProfile(world, modern, guest, owner)
+        val link = PlayerProfileLinks.read(world)[owner]?.takeIf { it.guest == guest }
+        val ownerHash = profileFingerprint(world, modern, owner)
+        val guestHash = profileFingerprint(world, modern, guest)
+        if (guestHash == null) return
+        val choice = when {
+            ownerHash == null -> PlayerProfileChoice.LAN
+            ownerHash == guestHash -> PlayerProfileChoice.OWNER
+            ownerHash == link?.fingerprint -> PlayerProfileChoice.LAN
+            guestHash == link?.fingerprint -> PlayerProfileChoice.OWNER
+            else -> resolveConflict(PlayerProfileConflictException(owner, guest))
+        }
+        if (ownerHash != guestHash) when (choice) {
+            PlayerProfileChoice.OWNER -> synchronizeProfile(world, modern, owner, guest)
+            PlayerProfileChoice.LAN -> synchronizeProfile(world, modern, guest, owner)
+        }
+        PlayerProfileLinks.record(world, owner, guest, requireNotNull(profileFingerprint(world, modern, owner)))
+    }
+
+    /** Fingerprints the complete profile, including stats; UUID aliases compare equal after synchronization. */
+    private fun profileFingerprint(world: Path, modern: Boolean, owner: UUID): String? {
+        val data = profilePath(world, modern, "data", owner, ".dat")
+        if (!Files.exists(data, NOFOLLOW_LINKS)) return null
+        val raw = readGzip(data)
+        playerPayloadStart(raw)
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(MessageDigest.getInstance("SHA-256").digest(withPlayerUuid(raw, UUID(0, 0))))
+        for (kind in listOf("advancements", "stats")) {
+            val path = profilePath(world, modern, kind, owner, ".json")
+            val exists = Files.exists(path, NOFOLLOW_LINKS)
+            digest.update(if (exists) 1.toByte() else 0.toByte())
+            if (exists) {
+                val jsonHash = MessageDigest.getInstance("SHA-256")
+                Files.newInputStream(path, NOFOLLOW_LINKS).use { input ->
+                    val buffer = ByteArray(8192)
+                    var count = input.read(buffer)
+                    while (count != -1) {
+                        jsonHash.update(buffer, 0, count)
+                        count = input.read(buffer)
+                    }
+                }
+                digest.update(jsonHash.digest())
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun synchronizeProfile(world: Path, modern: Boolean, source: UUID, target: UUID) {
@@ -209,15 +257,26 @@ object PlayerDataInspector {
         }
     }.toByteArray()
 
-    /** Prepares a private save for the chosen account; published world bytes stay unchanged. */
-    fun prepareSingleplayerOwner(world: Path, owner: UUID, guest: UUID? = null) {
+    /**
+     * Prepares a private save for the chosen account; published world bytes stay unchanged.
+     * Untracked or concurrently changed UUID profiles throw [PlayerProfileConflictException] unless resolved explicitly.
+     */
+    fun prepareSingleplayerOwner(
+        world: Path, owner: UUID, guest: UUID? = null,
+        resolveConflict: (PlayerProfileConflictException) -> PlayerProfileChoice = { throw it },
+    ) {
         val state = inspect(world)
         if (!state.levelReadable) throw IOException("Не удалось проверить level.dat")
         val raw = readLevel(world)
         val playerTag = findDataTag(raw, "Player")
         val uuidTag = findDataTag(raw, "singleplayer_uuid")
         if (playerTag != null && uuidTag != null) throw IOException("В level.dat одновременно есть Player и singleplayer_uuid")
-        if (guest != null) restoreLanOwner(world, owner, guest)
+        // Verify the old owner's backup before the chosen LAN state can replace that same UUID file.
+        if (playerTag != null) {
+            if (playerTag.type != 10) throw IOException("Некорректный Data.Player")
+            requireLegacyOwnerRecorded(world, extractLegacyPlayer(world))
+        }
+        if (guest != null) restoreLanOwner(world, owner, guest, resolveConflict)
         when {
             uuidTag != null -> {
                 readUuid(raw, uuidTag)
@@ -229,23 +288,6 @@ object PlayerDataInspector {
                 writeGzip(world.resolve("level.dat"), raw.splice(uuidTag, uuidTag("singleplayer_uuid", owner)))
             }
             playerTag != null -> {
-                if (playerTag.type != 10) throw IOException("Некорректный Data.Player")
-                val embedded = extractLegacyPlayer(world)
-                val playerDirectory = world.resolve("playerdata")
-                if (!Files.isDirectory(playerDirectory, NOFOLLOW_LINKS)) {
-                    throw IOException("Нет файла прежнего владельца. Отправитель должен опубликовать закрытый мир с UUID владельца")
-                }
-                val ownerRecorded = Files.newDirectoryStream(playerDirectory, "*.dat").use { files ->
-                    files.asSequence().any { file ->
-                        val name = file.fileName.toString().removeSuffix(".dat")
-                        val uuid = runCatching { UUID.fromString(name) }.getOrNull()
-                        uuid?.toString() == name && Files.isRegularFile(file, NOFOLLOW_LINKS) &&
-                            runCatching { readGzip(file).contentEquals(embedded) }.getOrDefault(false)
-                    }
-                }
-                if (!ownerRecorded) {
-                    throw IOException("Не найдена сохранённая запись прежнего владельца. Отправитель должен опубликовать закрытый мир с UUID владельца")
-                }
                 val target = world.resolve("playerdata/$owner.dat")
                 val replacement = if (Files.isRegularFile(target, NOFOLLOW_LINKS)) {
                     val bytes = readGzip(target)
@@ -262,6 +304,24 @@ object PlayerDataInspector {
                 }
                 writeGzip(world.resolve("level.dat"), raw.splice(playerTag, replacement))
             }
+        }
+    }
+
+    private fun requireLegacyOwnerRecorded(world: Path, embedded: ByteArray) {
+        val directory = world.resolve("playerdata")
+        if (!Files.isDirectory(directory, NOFOLLOW_LINKS)) {
+            throw IOException("Нет файла прежнего владельца. Отправитель должен опубликовать закрытый мир с UUID владельца")
+        }
+        val recorded = Files.newDirectoryStream(directory, "*.dat").use { files ->
+            files.asSequence().any { file ->
+                val name = file.fileName.toString().removeSuffix(".dat")
+                val uuid = runCatching { UUID.fromString(name) }.getOrNull()
+                uuid?.toString() == name && Files.isRegularFile(file, NOFOLLOW_LINKS) &&
+                    runCatching { readGzip(file).contentEquals(embedded) }.getOrDefault(false)
+            }
+        }
+        if (!recorded) {
+            throw IOException("Не найдена сохранённая запись прежнего владельца. Отправитель должен опубликовать закрытый мир с UUID владельца")
         }
     }
 
